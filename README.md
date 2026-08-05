@@ -54,54 +54,70 @@ Hardware
 
 ⸻
 
-Libraries
+## Libraries
 
 This project requires the following Arduino libraries:
 
-* SmartTM1637
-* DHT Sensor Library
-* RTClib
-* SD
-* SPI
+- SmartTM1637
+- MyDHT22
+- RTClib
+- SdFat
+- Wire (built into the Arduino IDE)
 
-Install them using the Arduino Library Manager before compiling.
-
+Install the required third-party libraries using the Arduino Library Manager before compiling.
 ⸻
 
-Data Logging
+## Data Logging
 
-Each successful reading is stored on the SD card with:
+Each reading is automatically stored on the SD card in CSV format.
 
-* Date
-* Time
-* Temperature (°C)
-* Humidity (%RH)
+The log file contains:
+
+- Date
+- Time
+- Temperature (°C)
+- Humidity (%RH)
+- DHT22 status
+- RTC status
+- SD card status
+- Display #1 status
+- Display #2 status
+- Supply voltage (VCC)
 
 Example:
 
-2026-08-05,14:35:10,29.6,71.8
+```text
+2026-08-05,14:35:10,29.6,71.8,1,1,1,1,1,4.97
+```
+
+If a DHT22 reading fails after all retry attempts, the logger records:
+
+```text
+2026-08-05,14:35:10,NA,NA,0,1,1,0,0,4.97
+```
 
 ⸻
 
-DHT22 Retry Mechanism
+## DHT22 Retry Mechanism
 
 Version 1.2.2 introduces a non-blocking retry system.
 
 Workflow:
 
-1. Start sensor reading.
-2. If reading succeeds:
-    * Save data.
-    * Update display.
-3. If reading fails:
-    * Wait for retry interval.
-    * Retry automatically.
-4. Maximum retries: 3
-5. If all retries fail:
-    * Skip the sample.
-    * Continue normal operation.
+1. Start a sensor reading session.
+2. If the reading succeeds:
+   - Update the displays.
+   - Save the measurement to the SD card.
+3. If the reading fails:
+   - Wait for the configured retry interval.
+   - Retry automatically.
+4. Maximum retry attempts: **3**.
+5. If all retry attempts fail:
+   - Record `NA` for Temperature and Humidity.
+   - Set `DHT_OK = 0` in the log file.
+   - Continue normal operation without blocking the main loop.
 
-This prevents temporary sensor errors from stopping the logger.
+This approach improves long-term reliability by allowing the logger to recover from temporary sensor communication errors while preserving a complete log history.
 
 ⸻
 
@@ -162,22 +178,28 @@ The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while
 
 ⸻
 
-Version History
+## Version History
 
-v1.2.2
+### v1.2.2
 
-* Added non-blocking DHT22 retry handling
-* Added maximum three retry attempts
-* Improved sensor reliability
-* Improved code organization
-* Improved main loop responsiveness
+- Refactored the non-blocking DHT22 retry mechanism
+- Improved code organization and readability
+- Improved retry state handling
+- Added safer VCC measurement
+- Updated CSV header names
+- Improved long-term reliability
 
-v1.2.1
+### v1.2.1
 
-* RTC integration
-* SD card logging
-* TM1637 display
-* DHT22 sensor support
+- Introduced DHT22 retry handling
+- Added up to three retry attempts
+- Improved sensor read reliability
+
+### v1.2.0
+
+- Added supply voltage (VCC) monitoring
+- Added display status logging
+- Improved SD card logging structure
 
 ⸻
 
