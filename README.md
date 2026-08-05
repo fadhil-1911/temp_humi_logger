@@ -131,6 +131,50 @@ Possible Future Improvements
 
 ⸻
 
+Pin Configuration
+
+Module	Signal	Arduino Pin	Notes
+DHT22	DATA	D8	Temperature & Humidity Sensor
+TM1637 Display #1	CLK	D2	Display Clock
+TM1637 Display #1	DIO	D3	Display Data
+TM1637 Display #2	CLK	D4	Display Clock
+TM1637 Display #2	DIO	D5	Display Data
+TM1637 Display #3	CLK	D6	Display Clock
+TM1637 Display #3	DIO	D7	Display Data
+MicroSD Module	CS	D10	Chip Select
+MicroSD Module	MOSI	D11	Hardware SPI
+MicroSD Module	MISO	D12	Hardware SPI
+MicroSD Module	SCK	D13	Hardware SPI
+DS3231 RTC	SDA	A4	I²C Bus
+DS3231 RTC	SCL	A5	I²C Bus
+
+Note
+
+The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while the MicroSD module uses the hardware SPI interface (D10–D13).
+
+                +----------------------+
+                |   Arduino Uno/Nano   |
+                +----------------------+
+      D2  ----------------> TM1637 #1 CLK
+      D3  ----------------> TM1637 #1 DIO
+
+      D4  ----------------> TM1637 #2 CLK
+      D5  ----------------> TM1637 #2 DIO
+
+      D6  ----------------> TM1637 #3 CLK
+      D7  ----------------> TM1637 #3 DIO
+
+      D8  ----------------> DHT22 DATA
+
+      D10 ----------------> SD Card CS
+      D11 ----------------> SD Card MOSI
+      D12 ----------------> SD Card MISO
+      D13 ----------------> SD Card SCK
+
+      A4  ----------------> DS3231 SDA
+      A5  ----------------> DS3231 SCL
+⸻
+
 Version History
 
 v1.2.2
