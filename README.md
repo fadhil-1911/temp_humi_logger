@@ -41,7 +41,7 @@ Improved
 
 ⸻
 
-Hardware
+## Hardware
 
 * Arduino Uno / Nano (or compatible)
 * DHT22 Temperature & Humidity Sensor
@@ -121,7 +121,7 @@ This approach improves long-term reliability by allowing the logger to recover f
 
 ⸻
 
-Advantages
+## Advantages
 
 * No delay() blocking
 * Better multitasking
@@ -132,7 +132,7 @@ Advantages
 
 ⸻
 
-Possible Future Improvements
+## Possible Future Improvements
 
 * Serial command interface
 * OLED/TFT display support
@@ -147,7 +147,7 @@ Possible Future Improvements
 
 ⸻
 
-Pin Configuration
+## Pin Configuration
 
 
             +----------------------+
