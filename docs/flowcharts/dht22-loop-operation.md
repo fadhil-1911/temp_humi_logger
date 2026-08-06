@@ -1,71 +1,149 @@
-Loop Operation Flow
+DHT22 Loop Operation Flow
+
+This document describes the complete non-blocking DHT22 reading, retry, display, RTC, voltage-monitoring, and SD-card logging operation.
+
+Operation Flow
 
 START loop()
-    ↓
+    │
+    ▼
 currentMillis = millis()
-    ↓
-Check whether a new DHT22 session should start
-    ├── Yes → Initialize session
-    └── No  → Skip initialization
-                    ↓
-            Paths merge here
-                    ↓
-Check whether retry attempt is due
-    ├── No → Skip retry processing
+    │
+    ▼
+Check whether a new DHT22 reading session should start
+    │
+    ├── Yes
+    │     │
+    │     ▼
+    │   Initialize reading session
+    │
+    └── No
+          │
+          ▼
+        Skip initialization
+          │
+          ▼
+Check whether a DHT22 retry attempt is due
+    │
+    ├── No
+    │     │
+    │     ▼
+    │   Skip retry processing
     │
     └── Yes
-          ↓
-       Update lastRetryTime
-          ↓
-       dht.readData() successful?
+          │
+          ▼
+        Update lastRetryTime
+          │
+          ▼
+        Call dht.readData()
+          │
+          ▼
+        Was the reading successful?
+          │
           ├── Yes
-          │     ↓
-          │  Read temperature and humidity
-          │  dhtStatus = true
-          │  readOK = true
-          │  retryInProgress = false
-          │  resultReady = true
+          │     │
+          │     ▼
+          │   Read temperature and humidity
+          │
+          │   dhtStatus      = true
+          │   readOK         = true
+          │   retryInProgress = false
+          │   resultReady    = true
           │
           └── No
-                ↓
-             retryCount++
-                ↓
-             retryCount >= maxRetry?
+                │
+                ▼
+              Increment retryCount
+                │
+                ▼
+              Has retryCount reached maxRetry?
+                │
                 ├── Yes
-                │     ↓
-                │  dhtStatus = false
-                │  readOK = false
-                │  retryInProgress = false
-                │  resultReady = true
+                │     │
+                │     ▼
+                │   dhtStatus       = false
+                │   readOK          = false
+                │   retryInProgress = false
+                │   resultReady     = true
                 │
                 └── No
-                      ↓
-                   Leave resultReady = false
-                    ↓
-            All paths merge here
-                    ↓
+                      │
+                      ▼
+                    Keep retryInProgress enabled
+                    resultReady remains false
+                    The next retry occurs in a future
+                    loop cycle after retryInterval
+          │
+          ▼
 Check resultReady
-    ├── No → Return to loop()
+    │
+    ├── No
+    │     │
+    │     ▼
+    │   Return to loop()
     │
     └── Yes
-          ↓
-       resultReady = false
-       Reset lastReadTimeDHT22
-       Read RTC
-       Format date and time
-       Read VCC
-          ↓
-       Check readOK
-          ├── Yes → Display values, set statuses,
-          │         toggle heartbeat, print values
           │
-          └── No  → Display Err, clear display statuses,
-                    print failure
-                          ↓
-                    Open log.csv
-                          ↓
-                    File opened?
-                       ├── Yes → Write CSV and close file
-                       └── No  → sdStatus = false
-                          ↓
-                    Return to loop()
+          ▼
+        resultReady = false
+        Reset lastReadTimeDHT22
+        Read the RTC
+        Validate RTC status
+        Format date and time
+        Read VCC once
+          │
+          ▼
+        Check readOK
+          │
+          ├── Yes
+          │     │
+          │     ▼
+          │   Display temperature
+          │   Display humidity
+          │   Set display status flags
+          │   Toggle HEARTBEAT_LED
+          │   Print values to Serial
+          │
+          └── No
+                │
+                ▼
+              Display "Err"
+              Clear display status flags
+              Print failure message to Serial
+          │
+          ▼
+        Open log.csv on the SD card
+          │
+          ▼
+        Was the file opened successfully?
+          │
+          ├── Yes
+          │     │
+          │     ▼
+          │   sdStatus = true
+          │
+          │   Write:
+          │   - Date
+          │   - Time
+          │   - Temperature or NA
+          │   - Humidity or NA
+          │   - DHT22 status
+          │   - RTC status
+          │   - SD status
+          │   - Display 1 status
+          │   - Display 2 status
+          │   - VCC voltage
+          │
+          │   Close log.csv
+          │   Print logging status to Serial
+          │
+          └── No
+                │
+                ▼
+              sdStatus = false
+              Print SD-card error to Serial
+          │
+          ▼
+Return to loop()
+
