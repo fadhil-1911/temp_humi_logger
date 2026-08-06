@@ -176,6 +176,9 @@ Note
 
 The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while the MicroSD module uses the hardware SPI interface (D10–D13).
 
+## Wiring Diagram
+
+![Arduino Nano Wiring Diagram](docs/wiring/arduino_nano_wiring_diagram.png)
 ⸻
 
 ## Version History
