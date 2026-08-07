@@ -27,7 +27,7 @@
 #define VERSION "v122"
 
 
-//======== Objek instantiation ========
+//======== Instantiation Object ========
 // Object instantiation: display 1-3 dari class SmartTM1637
 // Constructor arguments: CLK_PIN = pin jam, DIO_PIN = pin data
 SmartTM1637 display_1(CLK_PIN_1, DIO_PIN_1);  // Temp (TM1637 dot modul version)
@@ -39,7 +39,7 @@ RTC_DS3231 rtc;        // Object classRTC
 SdFat SD;              // Object class SD modul
 File logFile;          // Object class file sd SdFat
 
-unsigned long lastReadTimeDHT22 = 0;  // Simpan masa delay read dht22
+unsigned long lastReadTimeDHT22 = 0;  unsigned long lastReadTimeDHT22 = 0;  // Stores the timestamp of the last DHT22 read
 
 //====== Retry read dht22 (non blocking) =====
 const int maxRetry = 3;
@@ -73,7 +73,7 @@ void setup() {
   pinMode(HEARTBEAT_LED, OUTPUT);                      // loop indicator
 
   // RTC adjustment (if needed). Uncomment once only.
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
   //========== SD Card Setup ==========
   sdStatus = SD.begin(CS_PIN);
