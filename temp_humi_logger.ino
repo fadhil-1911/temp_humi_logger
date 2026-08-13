@@ -1,18 +1,30 @@
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//                   Version: 1.2.2
+//                   Version: 1.3.0
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 // Project: Temp/Huma Logger with RTC + DHT22 + SD + TM1637 (Version: 1.2.1 2025-07-19)
-// Date: 2026-08-05
+// Date: 2026-08-?
 // Fixes/additions:
-// Added non-blocking DHT22 retry handling with a maximum of 3 attempts
+// Added SHT41
 
 //======== Include library ========
 #include <SmartTM1637.h>  // library TM1637
-#include <MyDHT22.h>      // library dht22
 #include <Wire.h>         // i2c library
 #include <RTClib.h>       // library rtc
 #include <SdFat.h>        // library sdfat
+
+//#define SENSOR_DHT22  // SET FOR DHT22
+#define SENSOR_BME280  // SET FOR BME280
+
+#ifdef SENSOR_DHT22
+#include <MyDHT22.h>
+#endif
+
+#ifdef SENSOR_BME280
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#endif
+
 
 //======== Set io pin =========
 #define HEARTBEAT_LED 13  // internal led
@@ -24,8 +36,33 @@
 #define CLK_PIN_3 6       // TM1637 3
 #define DIO_PIN_3 7       // TM1637 3
 #define CS_PIN 10         // Chip select sd card
-#define VERSION "v122"
+#define VERSION "v130"
 
+/*/======== PINOUT ========
+DHT22.   Arduino Uno/Nano
+VCC   →  5V
+GND   →  GND
+DAT   →  D8
+
+------------------------------------------------
+BME280 — 6 pin
+-----------------
+VCC → 3.3V
+GND → GND
+SCL → A5
+SDA → A4
+CSB → 3.3V
+SDO → 3.3V     ← Address = 0x77 (IF GND > Address = 0x76)
+
+
+-------------------------------------------------
+BME280 — 4 pin Address = 0x76
+-----------------
+VCC → 3.3V
+GND → GND
+SCL → A5
+SDA → A4
+*/
 
 //======== Instantiation Object ========
 // Object instantiation: display 1-3 dari class SmartTM1637
@@ -33,13 +70,20 @@
 SmartTM1637 display_1(CLK_PIN_1, DIO_PIN_1);  // Temp (TM1637 dot modul version)
 SmartTM1637 display_2(CLK_PIN_2, DIO_PIN_2);  // Humadity (TM1637 dot modul version)
 SmartTM1637 display_3(CLK_PIN_3, DIO_PIN_3);  // Clock+Colon (TM1637 colon modul version)
+RTC_DS3231 rtc;                               // Object classRTC
+SdFat SD;                                     // Object class SD modul
+File logFile;                                 // Object class file sd SdFat
 
-MyDHT22 dht(DHT_PIN);  // Object class DHT22
-RTC_DS3231 rtc;        // Object classRTC
-SdFat SD;              // Object class SD modul
-File logFile;          // Object class file sd SdFat
+#ifdef SENSOR_DHT22
+MyDHT22 dht(DHT_PIN);
+#endif
 
-unsigned long lastReadTimeDHT22 = 0;  unsigned long lastReadTimeDHT22 = 0;  // Stores the timestamp of the last DHT22 read
+#ifdef SENSOR_BME280
+Adafruit_BME280 bme;
+#endif
+
+//unsigned long lastReadTimeDHT22 = 0;
+unsigned long lastReadTimeDHT22 = 0;  // Stores the timestamp of the last DHT22 read
 
 //====== Retry read dht22 (non blocking) =====
 const int maxRetry = 3;
@@ -49,7 +93,7 @@ const unsigned long retryInterval = 2000;
 bool readOK = false;
 bool retryInProgress = false;
 float temp = 0.0, humi = 0.0;
-bool dhtStatus = false;
+bool sensorStatus = false;
 bool rtcStatus = false;
 bool sdStatus = false;
 bool disp1Status = false;
@@ -93,6 +137,20 @@ void setup() {
     }
   }
 
+#ifdef SENSOR_DHT22
+  Serial.println(F("Sensor: DHT22"));
+#endif
+
+#ifdef SENSOR_BME280
+  Serial.println(F("Sensor: BME280"));
+
+  if (!bme.begin(0x76)) {
+    Serial.println(F("BME280 initialization failed!"));
+  } else {
+    Serial.println(F("BME280 initialization OK"));
+  }
+#endif
+
   delay(3000);
 }
 
@@ -110,7 +168,7 @@ void loop() {
 
     retryCount = 0;
     readOK = false;
-    dhtStatus = false;
+    sensorStatus = false;
     disp1Status = false;  // display 1
     disp2Status = false;  // display 2
 
@@ -121,17 +179,19 @@ void loop() {
   }
 
   //====================================================
-  // 2. Process DHT22 retry attempts
+  // 2. Process sensor retry attempts
   //====================================================
   if (retryInProgress && currentMillis - lastRetryTime >= retryInterval) {
 
     lastRetryTime = currentMillis;
 
+#ifdef SENSOR_DHT22
+
     if (dht.readData()) {
       temp = dht.getTemperature();
       humi = dht.getHumidity();
 
-      dhtStatus = true;
+      sensorStatus = true;
       readOK = true;
       retryInProgress = false;
       resultReady = true;
@@ -139,18 +199,50 @@ void loop() {
     } else {
       retryCount++;
 
-      Serial.print("DHT22 reading attempt failed: ");
+      Serial.print(F("DHT22 reading attempt failed: "));
       Serial.print(retryCount);
-      Serial.print("/");
+      Serial.print(F("/"));
       Serial.println(maxRetry);
 
       if (retryCount >= maxRetry) {
-        dhtStatus = false;
+        sensorStatus = false;
         readOK = false;
         retryInProgress = false;
         resultReady = true;
       }
     }
+
+#endif
+
+
+#ifdef SENSOR_BME280
+
+    temp = bme.readTemperature();
+    humi = bme.readHumidity();
+
+    if (!isnan(temp) && !isnan(humi)) {
+      sensorStatus = true;
+      readOK = true;
+      retryInProgress = false;
+      resultReady = true;
+
+    } else {
+      retryCount++;
+
+      Serial.print(F("BME280 reading attempt failed: "));
+      Serial.print(retryCount);
+      Serial.print(F("/"));
+      Serial.println(maxRetry);
+
+      if (retryCount >= maxRetry) {
+        sensorStatus = false;
+        readOK = false;
+        retryInProgress = false;
+        resultReady = true;
+      }
+    }
+
+#endif
   }
 
   //====================================================
@@ -198,7 +290,7 @@ void loop() {
 
       digitalWrite(
         HEARTBEAT_LED,
-        !digitalRead(HEARTBEAT_LED));
+        !digitalRead(HEARTBEAT_LED)); // !-AUTO TOGGLE 
 
       Serial.print("Temp: ");
       Serial.print(temp, 1);
@@ -232,7 +324,7 @@ void loop() {
       logFile.print(timeStr);
       logFile.print(",");
 
-      if (dhtStatus) {
+      if (sensorStatus) {
         logFile.print(temp, 1);
       } else {
         logFile.print("NA");
@@ -240,14 +332,14 @@ void loop() {
 
       logFile.print(",");
 
-      if (dhtStatus) {
+      if (sensorStatus) {
         logFile.print(humi, 1);
       } else {
         logFile.print("NA");
       }
 
       logFile.print(",");
-      logFile.print(dhtStatus ? "1" : "0");
+      logFile.print(sensorStatus ? "1" : "0");
 
       logFile.print(",");
       logFile.print(rtcStatus ? "1" : "0");
@@ -266,7 +358,7 @@ void loop() {
 
       logFile.close();
 
-      if (dhtStatus) {
+      if (sensorStatus) {
         Serial.println("✅ Log saved to SD card");
       } else {
         Serial.println("⚠️ DHT22 failure logged");
@@ -287,7 +379,7 @@ void loop() {
   uint8_t minute = clockNow.minute();
 
   bool showColon =
-    (currentMillis / 500) % 2 == 0;
+    (currentMillis / 500) % 2 == 0; // DOUBLE DOT BLINK
 
   display_3.printTime(
     hour,
