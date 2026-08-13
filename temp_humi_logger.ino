@@ -1,5 +1,5 @@
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//                   Version: 1.2.2
+//                   Version: 1.2.3
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 // Project: Temp/Huma Logger with RTC + DHT22 + SD + TM1637 (Version: 1.2.1 2025-07-19)
@@ -15,16 +15,16 @@
 #include <SdFat.h>        // library sdfat
 
 //======== Set io pin =========
-#define HEARTBEAT_LED 13  // internal led
-#define DHT_PIN 8         // DHT22
-#define CLK_PIN_1 2       // TM1637 1
-#define DIO_PIN_1 3       // TM1637 1
-#define CLK_PIN_2 4       // TM1637 2
-#define DIO_PIN_2 5       // TM1637 2
-#define CLK_PIN_3 6       // TM1637 3
-#define DIO_PIN_3 7       // TM1637 3
-#define CS_PIN 10         // Chip select sd card
-#define VERSION "v122"
+#define HEARTBEAT_LED 9  // external heartbeat LED
+#define DHT_PIN 8        // DHT22
+#define CLK_PIN_1 2      // TM1637 1
+#define DIO_PIN_1 3      // TM1637 1
+#define CLK_PIN_2 4      // TM1637 2
+#define DIO_PIN_2 5      // TM1637 2
+#define CLK_PIN_3 6      // TM1637 3
+#define DIO_PIN_3 7      // TM1637 3
+#define CS_PIN 10        // Chip select sd card
+#define VERSION "v123"
 
 
 //======== Instantiation Object ========
@@ -39,7 +39,13 @@ RTC_DS3231 rtc;        // Object classRTC
 SdFat SD;              // Object class SD modul
 File logFile;          // Object class file sd SdFat
 
-unsigned long lastReadTimeDHT22 = 0;  unsigned long lastReadTimeDHT22 = 0;  // Stores the timestamp of the last DHT22 read
+unsigned long lastReadTimeDHT22 = 0;  // Stores the timestamp of the last DHT22 read
+
+unsigned long lastClockUpdate = 0;
+const unsigned long clockUpdateInterval = 250;
+
+unsigned long lastHeartbeat = 0;
+bool heartbeatState = false;
 
 //====== Retry read dht22 (non blocking) =====
 const int maxRetry = 3;
@@ -64,9 +70,12 @@ void setup() {
   display_2.begin(4);
   display_3.begin(1);
   Wire.begin();
-  Wire.setClock(400000);  // I2C Fast Mode
+  Wire.setClock(100000);  // 100 kHz
+  Wire.setWireTimeout(25000, true);
 
-  rtc.begin();
+  if (!rtc.begin()) {
+    Serial.println("RTC initialization failed");
+  }
 
   display_1.print("init");
   display_2.print(VERSION, false, true, true, false);  // print code version
@@ -164,7 +173,14 @@ void loop() {
 
     // Get the current time when the result is ready to be saved
     DateTime now = rtc.now();
-    rtcStatus = (now.year() >= 2020);
+
+    if (Wire.getWireTimeoutFlag()) {
+      Serial.println("WARNING: I2C timeout during RTC log read");
+      Wire.clearWireTimeoutFlag();
+      rtcStatus = false;
+    } else {
+      rtcStatus = (now.year() >= 2020);
+    }
 
     char dateStr[11];
     char timeStr[9];
@@ -196,9 +212,11 @@ void loop() {
       disp1Status = true;
       disp2Status = true;
 
+      /*
       digitalWrite(
         HEARTBEAT_LED,
-        !digitalRead(HEARTBEAT_LED));
+        !digitalRead(HEARTBEAT_LED)); 
+        */
 
       Serial.print("Temp: ");
       Serial.print(temp, 1);
@@ -226,12 +244,31 @@ void loop() {
     if (logFile) {
       sdStatus = true;
 
-      logFile.print(dateStr);
+      //==================================================
+      // Date
+      //==================================================
+      if (rtcStatus) {
+        logFile.print(dateStr);
+      } else {
+        logFile.print("NA");
+      }
+
       logFile.print(",");
 
-      logFile.print(timeStr);
+      //==================================================
+      // Time
+      //==================================================
+      if (rtcStatus) {
+        logFile.print(timeStr);
+      } else {
+        logFile.print("NA");
+      }
+
       logFile.print(",");
 
+      //==================================================
+      // Temperature
+      //==================================================
       if (dhtStatus) {
         logFile.print(temp, 1);
       } else {
@@ -240,12 +277,18 @@ void loop() {
 
       logFile.print(",");
 
+      //==================================================
+      // Humidity
+      //==================================================
       if (dhtStatus) {
         logFile.print(humi, 1);
       } else {
         logFile.print("NA");
       }
 
+      //==================================================
+      // Status flags
+      //==================================================
       logFile.print(",");
       logFile.print(dhtStatus ? "1" : "0");
 
@@ -261,15 +304,28 @@ void loop() {
       logFile.print(",");
       logFile.print(disp2Status ? "1" : "0");
 
+      //==================================================
+      // VCC
+      //==================================================
       logFile.print(",");
       logFile.println(vccVolts, 2);
 
       logFile.close();
 
-      if (dhtStatus) {
+      //==================================================
+      // Serial status
+      //==================================================
+      if (dhtStatus && rtcStatus) {
         Serial.println("✅ Log saved to SD card");
-      } else {
+
+      } else if (!dhtStatus && !rtcStatus) {
+        Serial.println("⚠️ DHT22 and RTC failure logged");
+
+      } else if (!dhtStatus) {
         Serial.println("⚠️ DHT22 failure logged");
+
+      } else {
+        Serial.println("⚠️ RTC failure logged");
       }
 
     } else {
@@ -281,18 +337,38 @@ void loop() {
   //====================================================
   // 4. Continuously update the clock display
   //====================================================
-  DateTime clockNow = rtc.now();
+  if (currentMillis - lastClockUpdate >= clockUpdateInterval) {
+    lastClockUpdate = currentMillis;
 
-  uint8_t hour = clockNow.hour();
-  uint8_t minute = clockNow.minute();
+    DateTime clockNow = rtc.now();
 
-  bool showColon =
-    (currentMillis / 500) % 2 == 0;
+    if (Wire.getWireTimeoutFlag()) {
+      Serial.println("WARNING: I2C timeout");
+      Wire.clearWireTimeoutFlag();
+      rtcStatus = false;
+    } else {
+      rtcStatus = true;
 
-  display_3.printTime(
-    hour,
-    minute,
-    showColon);
+      uint8_t hour = clockNow.hour();
+      uint8_t minute = clockNow.minute();
+
+      bool showColon =
+        (currentMillis / 500) % 2 == 0;
+
+      display_3.printTime(
+        hour,
+        minute,
+        showColon);
+    }
+  }
+
+
+  if (currentMillis - lastHeartbeat >= 1000) {
+    lastHeartbeat = currentMillis;
+
+    heartbeatState = !heartbeatState;
+    digitalWrite(HEARTBEAT_LED, heartbeatState);
+  }
 }
 
 // Internal voltage monitor
