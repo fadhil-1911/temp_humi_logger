@@ -207,7 +207,9 @@ The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while
 
 ## Program Flow
 
-![Temp Humi Flow](docs/wiring/dht22-loop-operation.md)
+The complete DHT22 loop operation and program flow are documented separately.
+
+[View DHT22 Loop Operation](docs/wiring/dht22-loop-operation.md)
 ⸻
 
 ## Version History
