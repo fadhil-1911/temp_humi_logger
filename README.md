@@ -205,6 +205,11 @@ The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while
 ![Arduino Nano Wiring Diagram](docs/wiring/temp_humi_logger_arduino_nano.png)
 ⸻
 
+## Program Flow
+
+![Temp Humi Flow](docs/wiring/dht22-loop-operation.md)
+⸻
+
 ## Version History
 
 ### v1.2.3
