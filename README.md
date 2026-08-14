@@ -48,7 +48,9 @@ Version 1.2.3 focuses on long-run reliability, adding hardware watchdog recovery
 * DHT22 Temperature & Humidity Sensor
 * DS3231 RTC Module
 * MicroSD Card Module
-* TM1637 4-Digit Display
+* TM1637 4-Digit Display 1 Tempearture (dot version)
+* TM1637 4-Digit Display 2 Huminity (dot version)
+* TM1637 4-Digit Display 3 Clock (semi colon version)
 * MicroSD Card
 * Jumper wires
 * 5V power supply
