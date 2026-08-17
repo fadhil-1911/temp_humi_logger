@@ -1,43 +1,44 @@
 # temp_humi_logger
 
-Temp/Humi Logger v1.2.2
+## Temp/Humi Logger v1.2.3
 
-A reliable Arduino-based Temperature & Humidity Data Logger featuring a DHT22 sensor, DS3231 Real-Time Clock (RTC), MicroSD card logging, and a TM1637 4-digit display.
+A reliable Arduino-based Temperature & Humidity Data Logger featuring a DHT22 sensor, DS3231 Real-Time Clock (RTC), MicroSD card logging, and three TM1637 4-digit displays.
 
-Version 1.2.2 introduces a more robust, non-blocking DHT22 reading mechanism with automatic retry handling, improving stability without interrupting the main program.
+Version 1.2.3 focuses on long-run reliability, adding hardware watchdog recovery, I2C timeout protection, independent heartbeat monitoring, low-voltage diagnostics, and improved RTC handling.
+
+---
+
+## Features
+
+* Temperature measurement using DHT22
+* Relative humidity measurement
+* Accurate timestamps using DS3231 RTC
+* Automatic logging to MicroSD card
+* Live data display on TM1637 4-digit display
+* Non-blocking program architecture using millis()
+* Automatic DHT22 retry (maximum 3 attempts)
+* CSV-compatible log files
+* Improved reliability during sensor read failures
 
 ⸻
 
-Features
+## What’s New in v1.2.3
 
-* 🌡️ Temperature measurement using DHT22
-* 💧 Relative humidity measurement
-* 🕒 Accurate timestamps using DS3231 RTC
-* 💾 Automatic logging to MicroSD card
-* 📟 Live data display on TM1637 4-digit display
-* ⚡ Non-blocking program architecture using millis()
-* 🔁 Automatic DHT22 retry (maximum 3 attempts)
-* 📂 CSV-compatible log files
-* 🛡️ Improved reliability during sensor read failures
+### Added
 
-⸻
+* 8-second hardware watchdog recovery
+* Independent main-loop heartbeat on D9
+* I2C timeout protection with automatic TWI recovery
+* Low-VCC warning below 4.5 V
+* RTC timeout detection during logging
+* `NA` timestamp logging when RTC data is invalid
 
-What’s New in v1.2.2
+### Improved
 
-Added
-
-* Non-blocking DHT22 retry handling
-* Maximum of three retry attempts
-* Retry delay without stopping the main loop
-* Cleaner task separation
-* Better program responsiveness
-
-Improved
-
-* Overall code structure
-* Sensor fault tolerance
-* Main loop readability
-* Easier future expansion
+* Reduced I2C bus speed to 100 kHz for better stability
+* Reduced RTC polling frequency to minimize I2C traffic
+* Improved long-run reliability and freeze recovery
+* Improved separation between sensor, clock, logging, and heartbeat tasks
 
 ⸻
 
@@ -47,7 +48,9 @@ Improved
 * DHT22 Temperature & Humidity Sensor
 * DS3231 RTC Module
 * MicroSD Card Module
-* TM1637 4-Digit Display
+* TM1637 4-Digit Display 1 Tempearture (dot version)
+* TM1637 4-Digit Display 2 Huminity (dot version)
+* TM1637 4-Digit Display 3 Clock (semi colon version)
 * MicroSD Card
 * Jumper wires
 * 5V power supply
@@ -63,13 +66,16 @@ This project requires the following Arduino libraries:
 - RTClib
 - SdFat
 - Wire (built into the Arduino IDE)
+- AVR Watchdog (`avr/wdt.h`, included with the AVR toolchain)
 
 Install the required third-party libraries using the Arduino Library Manager before compiling.
+
+The `Wire` library is included with the Arduino IDE, while `avr/wdt.h` is provided by the AVR core/toolchain and does not require separate installation.
 ⸻
 
 ## Data Logging
 
-Each reading is automatically stored on the SD card in CSV format.
+Each completed reading cycle is automatically stored on the SD card in CSV format.
 
 The log file contains:
 
@@ -84,50 +90,70 @@ The log file contains:
 - Display #2 status
 - Supply voltage (VCC)
 
-Example:
-
+Example of a normal reading:
 ```text
-2026-08-05,14:35:10,29.6,71.8,1,1,1,1,1,4.97
+2026-08-14,14:35:10,29.6,71.8,1,1,1,1,1,4.97
+```
+If a DHT22 reading fails after all retry attempts, temperature and humidity are recorded as NA:
+```text
+2026-08-14,14:35:10,NA,NA,0,1,1,0,0,4.97
+```
+If the RTC reading is invalid or an I2C timeout occurs, the date and time are recorded as NA:
+```text
+NA,NA,29.6,71.8,1,0,1,1,1,4.97
 ```
 
-If a DHT22 reading fails after all retry attempts, the logger records:
-
+If both the DHT22 and RTC readings fail:
 ```text
-2026-08-05,14:35:10,NA,NA,0,1,1,0,0,4.97
+NA,NA,NA,NA,0,0,1,0,0,4.97
 ```
+Status values use:
+1 = OK
+0 = Failed
+
+Invalid measurement or timestamp fields are stored as NA instead of potentially incorrect data.
 
 ⸻
 
 ## DHT22 Retry Mechanism
 
-Version 1.2.2 introduces a non-blocking retry system.
+Version 1.2.3 retains and improves the non-blocking DHT22 retry system.
 
 Workflow:
 
-1. Start a sensor reading session.
-2. If the reading succeeds:
-   - Update the displays.
+1. Start a new DHT22 reading session.
+2. Attempt to read temperature and humidity.
+3. If the reading succeeds:
+   - Store the latest Temperature and Humidity values.
+   - Update the temperature and humidity displays.
+   - Set `DHT_OK = 1`.
    - Save the measurement to the SD card.
-3. If the reading fails:
+4. If the reading fails:
    - Wait for the configured retry interval.
-   - Retry automatically.
-4. Maximum retry attempts: **3**.
-5. If all retry attempts fail:
+   - Retry automatically without blocking the main loop.
+5. Maximum retry attempts: **3**.
+6. If all retry attempts fail:
    - Record `NA` for Temperature and Humidity.
    - Set `DHT_OK = 0` in the log file.
-   - Continue normal operation without blocking the main loop.
+   - Display an error indication.
+   - Continue normal system operation.
 
-This approach improves long-term reliability by allowing the logger to recover from temporary sensor communication errors while preserving a complete log history.
+The retry process is handled using a non-blocking state-based approach, allowing other tasks such as RTC updates, clock display refresh, heartbeat monitoring, and watchdog servicing to continue running while the DHT22 retry process is active.
+
+This improves long-term reliability by allowing the logger to recover from temporary sensor communication errors without stopping the entire system.
 
 ⸻
 
 ## Advantages
 
-* No delay() blocking
-* Better multitasking
-* Stable long-term logging
-* Easier debugging
-* Easier maintenance
+* Non-blocking sensor retry handling
+* Improved multitasking and responsiveness
+* Better long-term logging stability
+* Automatic recovery from firmware hangs using the hardware watchdog
+* Improved I2C reliability with timeout protection
+* Independent heartbeat monitoring
+* Low-voltage monitoring for easier power diagnostics
+* Easier debugging and maintenance
 * Ready for future feature expansion
 
 ⸻
@@ -163,7 +189,7 @@ This approach improves long-term reliability by allowing the logger to recover f
       D7  ----------------> TM1637 #3 DIO
 
       D8  ----------------> DHT22 DATA
-
+      D9 -----------------> Heartbeat LED indicator
       D10 ----------------> SD Card CS
       D11 ----------------> SD Card MOSI
       D12 ----------------> SD Card MISO
@@ -181,7 +207,28 @@ The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while
 ![Arduino Nano Wiring Diagram](docs/wiring/temp_humi_logger_arduino_nano.png)
 ⸻
 
+## Program Flow
+
+The complete DHT22 loop operation and program flow are documented separately.
+
+[View DHT22 Loop Operation](docs/flowcharts/dht22-loop-operation.md)
+⸻
+
 ## Version History
+
+### v1.2.3
+
+- Added 8-second hardware watchdog recovery
+- Added periodic watchdog servicing in the main loop
+- Added I2C timeout protection and automatic TWI recovery
+- Reduced I2C bus speed to 100 kHz for improved stability
+- Reduced RTC polling frequency to minimize I2C traffic
+- Moved heartbeat LED from D13 to D9 to avoid SPI SCK conflict
+- Added independent main-loop heartbeat monitoring
+- Added low-VCC warning below 4.5 V
+- Added RTC timeout detection during logging
+- Added `NA` logging for invalid RTC date and time
+- Improved long-run stability and freeze recovery
 
 ### v1.2.2
 
@@ -204,25 +251,25 @@ The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while
 - Added display status logging
 - Improved SD card logging structure
 
-⸻
+---
 
-License
+## License
 
 This project is released under the MIT License.
 
 You are free to use, modify, and distribute this project under the terms of the license.
 
-⸻
+---
 
-Author
+## Author
 
 Fadhil Hashim
 
 Embedded Systems • Arduino • Automotive Electronics • Data Logging
 
-⸻
+---
 
-Contributing
+## Contributing
 
 Contributions, bug reports, and feature suggestions are welcome.
 
