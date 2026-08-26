@@ -551,108 +551,109 @@ void loop() {
 
         sdStatus = false;
         Serial.println(F("❌ Failed to open log.csv"));
+        Serial.println(F("⚠️ SD Card Not Available - RESET required"));
       }
     }
   }
 
-    //========================================================
-    // 4. Update the RTC Clock Display
-    //========================================================
-    // Update the clock display every 250 ms instead of reading
-    // the RTC continuously on every loop iteration.
-    if (currentMillis - lastClockUpdate >= clockUpdateInterval) {
+  //========================================================
+  // 4. Update the RTC Clock Display
+  //========================================================
+  // Update the clock display every 250 ms instead of reading
+  // the RTC continuously on every loop iteration.
+  if (currentMillis - lastClockUpdate >= clockUpdateInterval) {
 
-      // Record the time of this display update.
-      lastClockUpdate = currentMillis;
+    // Record the time of this display update.
+    lastClockUpdate = currentMillis;
 
-      // Read the current RTC time.
-      DateTime clockNow = rtc.now();
+    // Read the current RTC time.
+    DateTime clockNow = rtc.now();
 
-      // Check whether the RTC read caused an I2C timeout.
-      if (Wire.getWireTimeoutFlag()) {
-        Serial.println(F("WARNING: I2C timeout"));
+    // Check whether the RTC read caused an I2C timeout.
+    if (Wire.getWireTimeoutFlag()) {
+      Serial.println(F("WARNING: I2C timeout"));
 
-        // Clear the timeout flag for future monitoring.
-        Wire.clearWireTimeoutFlag();
+      // Clear the timeout flag for future monitoring.
+      Wire.clearWireTimeoutFlag();
 
-        // Mark the RTC as unavailable.
-        rtcStatus = false;
+      // Mark the RTC as unavailable.
+      rtcStatus = false;
 
-      } else {
+    } else {
 
-        // RTC communication succeeded.
-        rtcStatus = true;
+      // RTC communication succeeded.
+      rtcStatus = true;
 
-        // Extract hour and minute for the clock display.
-        uint8_t hour = clockNow.hour();
-        uint8_t minute = clockNow.minute();
+      // Extract hour and minute for the clock display.
+      uint8_t hour = clockNow.hour();
+      uint8_t minute = clockNow.minute();
 
-        // Blink the clock colon every 500 ms.
-        bool showColon = (currentMillis / 500) % 2 == 0;
+      // Blink the clock colon every 500 ms.
+      bool showColon = (currentMillis / 500) % 2 == 0;
 
-        // Update the TM1637 clock display.
-        display_3.printTime(
-          hour,
-          minute,
-          showColon);
-      }
-    }
-
-    //========================================================
-    // 5. Main Loop Heartbeat
-    //========================================================
-    // Toggle the external LED every second.
-    // A stopped LED indicates that the main loop is no longer progressing.
-    if (currentMillis - lastHeartbeat >= 1000) {
-
-      // Save the current heartbeat timestamp.
-      lastHeartbeat = currentMillis;
-
-      // Toggle the LED state.
-      heartbeatState = !heartbeatState;
-
-      // Apply the new state to the external LED.
-      digitalWrite(HEARTBEAT_LED, heartbeatState);
+      // Update the TM1637 clock display.
+      display_3.printTime(
+        hour,
+        minute,
+        showColon);
     }
   }
 
-  //==========================================================
-  // Internal VCC Monitor
-  //==========================================================
-  long readVcc() {
+  //========================================================
+  // 5. Main Loop Heartbeat
+  //========================================================
+  // Toggle the external LED every second.
+  // A stopped LED indicates that the main loop is no longer progressing.
+  if (currentMillis - lastHeartbeat >= 1000) {
 
-    // Select AVcc as the ADC reference and measure
-    // the ATmega328P internal nominal 1.1 V reference.
-    ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+    // Save the current heartbeat timestamp.
+    lastHeartbeat = currentMillis;
 
-    // Allow the ADC reference and multiplexer to stabilize.
-    delay(2);
+    // Toggle the LED state.
+    heartbeatState = !heartbeatState;
 
-    // Perform one dummy conversion to stabilize the ADC result.
-    ADCSRA |= _BV(ADSC);
+    // Apply the new state to the external LED.
+    digitalWrite(HEARTBEAT_LED, heartbeatState);
+  }
+}
 
-    while (bit_is_set(ADCSRA, ADSC)) {
-    }
+//==========================================================
+// Internal VCC Monitor
+//==========================================================
+long readVcc() {
 
-    // Perform the actual ADC conversion.
-    ADCSRA |= _BV(ADSC);
+  // Select AVcc as the ADC reference and measure
+  // the ATmega328P internal nominal 1.1 V reference.
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
 
-    while (bit_is_set(ADCSRA, ADSC)) {
-    }
+  // Allow the ADC reference and multiplexer to stabilize.
+  delay(2);
 
-    // Read the completed ADC conversion result.
-    uint16_t result = ADC;
+  // Perform one dummy conversion to stabilize the ADC result.
+  ADCSRA |= _BV(ADSC);
 
-    // Avoid division by zero if the ADC returns an invalid result.
-    if (result == 0) {
-      return 0;
-    }
-
-    // Calibrated internal-reference constant used to estimate VCC.
-    const long VCC_CALIBRATION = 1111800L;
-
-    // Return the estimated MCU supply voltage in millivolts.
-    return VCC_CALIBRATION / result;
+  while (bit_is_set(ADCSRA, ADSC)) {
   }
 
-  //========================= END =========================
+  // Perform the actual ADC conversion.
+  ADCSRA |= _BV(ADSC);
+
+  while (bit_is_set(ADCSRA, ADSC)) {
+  }
+
+  // Read the completed ADC conversion result.
+  uint16_t result = ADC;
+
+  // Avoid division by zero if the ADC returns an invalid result.
+  if (result == 0) {
+    return 0;
+  }
+
+  // Calibrated internal-reference constant used to estimate VCC.
+  const long VCC_CALIBRATION = 1111800L;
+
+  // Return the estimated MCU supply voltage in millivolts.
+  return VCC_CALIBRATION / result;
+}
+
+//========================= END =========================
