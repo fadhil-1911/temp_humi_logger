@@ -372,7 +372,7 @@ D8 is only used when the DHT22 configuration is enabled. When SHT41 is selected,
 
 The complete DHT22 loop operation and program flow are documented separately.
 
-[View DHT22 Loop Operation](docs/flowcharts/dht22-loop-operation.md)
+[View DHT22 Loop Operation](docs/flowcharts/loop operation.md)
 ⸻
 
 ## Version History
