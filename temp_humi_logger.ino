@@ -17,7 +17,7 @@ Updates: - Added SHT41 temperature and humidity sensor support.
 - operating after an SD logging failure. 
 - SD logging is disabled after a card failure until the logger is reset. 
 - Optimized constant Serial strings with F() to reduce SRAM usage. 
-- Preserved watchdog, I2C timeout, RTC, heartbeat, VCC monitoring, and CSV diagnostics. 
+- Removed 8-second hardware watchdog recovery due to stability issues
 */
 
 //==========================================================
@@ -27,7 +27,6 @@ Updates: - Added SHT41 temperature and humidity sensor support.
 #include <Wire.h>         // I2C communication
 #include <RTClib.h>       // DS3231 RTC support
 #include <SdFat.h>        // SD card file system
-#include <avr/wdt.h>      // AVR hardware watchdog timer
 
 //==========================================================
 // Pin Configuration
@@ -142,9 +141,6 @@ bool disp2Status = false;   // Humidity display status
 //==========================================================
 void setup() {
 
-  // Disable the watchdog during system initialization.
-  wdt_disable();
-
   // Initialize serial communication for diagnostics.
   Serial.begin(9600);
 
@@ -230,18 +226,12 @@ void setup() {
 
   // Enable the hardware watchdog.
   // The MCU will reset if the main loop stops servicing it for 8 seconds.
-  wdt_enable(WDTO_8S);
 }
 
 //==========================================================
 // Main Loop
 //==========================================================
 void loop() {
-
-  // Confirm that the main loop is still running.
-  // If execution becomes blocked for more than 8 seconds,
-  // the watchdog will automatically reset the MCU.
-  wdt_reset();
 
   // Capture millis() once and reuse it throughout this loop iteration.
   unsigned long currentMillis = millis();
