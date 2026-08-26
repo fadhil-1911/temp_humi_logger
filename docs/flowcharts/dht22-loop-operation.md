@@ -1,4 +1,4 @@
-Temp/Humi Logger v1.2.3
+Temp/Humi Logger v1.3.0
 │
 ├── POWER / MCU
 │   └── Arduino Uno / Nano (ATmega328P)
@@ -13,40 +13,59 @@ Temp/Humi Logger v1.2.3
 │           └── Automatic MCU reset if firmware hangs
 │
 ├── SENSOR
-│   └── DHT22
-│       ├── DATA → D8
-│       ├── Temperature
-│       ├── Humidity
+│   │
+│   ├── Compile-Time Sensor Selection
+│   │   ├── SENSOR_DHT22
+│   │   └── SENSOR_SHT41
+│   │
+│   ├── DHT22
+│   │   ├── DATA → D8
+│   │   ├── Temperature
+│   │   └── Humidity
+│   │
+│   ├── SHT41
+│   │   ├── I²C
+│   │   │   ├── SDA → A4
+│   │   │   └── SCL → A5
+│   │   ├── Temperature
+│   │   ├── Humidity
+│   │   ├── Initialization status detection
+│   │   └── Communication failure detection
+│   │
+│   └── Common Non-Blocking Read State Machine
+│       ├── Start sensor reading session
+│       ├── Read attempt
+│       ├── Retry on failure
+│       │   ├── Maximum: 3 attempts
+│       │   └── Retry interval: 2000 ms
 │       │
-│       └── Non-blocking Read State Machine
-│           ├── Start reading session
-│           ├── Read attempt
-│           ├── Retry on failure
-│           │   ├── Maximum: 3 attempts
-│           │   └── Retry interval: 2000 ms
+│       └── Result
+│           ├── SUCCESS
+│           │   ├── temp
+│           │   ├── humi
+│           │   └── SENSOR_OK = 1
 │           │
-│           └── Result
-│               ├── SUCCESS
-│               │   ├── temp
-│               │   ├── humi
-│               │   └── DHT_OK = 1
-│               │
-│               └── FAILED
-│                   ├── Temperature = NA
-│                   ├── Humidity = NA
-│                   └── DHT_OK = 0
+│           └── FAILED
+│               ├── Temperature = NA
+│               ├── Humidity = NA
+│               ├── SENSOR_OK = 0
+│               └── Displays → "Err"
+│
+├── I²C BUS
+│   ├── SDA → A4
+│   ├── SCL → A5
+│   ├── Bus speed → 100 kHz
+│   ├── DS3231 RTC
+│   ├── SHT41 (when selected)
+│   │
+│   └── I²C Protection
+│       ├── Timeout → 25 ms
+│       ├── Automatic TWI reset
+│       └── Timeout flag detection
 │
 ├── RTC / TIME
 │   └── DS3231
-│       ├── I²C
-│       │   ├── SDA → A4
-│       │   ├── SCL → A5
-│       │   └── Bus speed → 100 kHz
-│       │
-│       ├── I²C Protection
-│       │   ├── Timeout → 25 ms
-│       │   ├── Automatic TWI reset
-│       │   └── Timeout flag detection
+│       ├── I²C → A4/A5
 │       │
 │       ├── Timestamp
 │       │   ├── Date → YYYY-MM-DD
@@ -85,17 +104,24 @@ Temp/Humi Logger v1.2.3
 │       │   ├── MISO → D12
 │       │   └── SCK  → D13
 │       │
-│       └── log.csv
-│           ├── Date
-│           ├── Time
-│           ├── Temperature_C
-│           ├── Humidity_PCT
-│           ├── DHT_OK
-│           ├── RTC_OK
-│           ├── SD_OK
-│           ├── DISP1_OK
-│           ├── DISP2_OK
-│           └── VCC_V
+│       ├── log.csv
+│       │   ├── Date
+│       │   ├── Time
+│       │   ├── Temp_C
+│       │   ├── Humi_PCT
+│       │   ├── SENSOR_OK
+│       │   ├── RTC_OK
+│       │   ├── SD_OK
+│       │   ├── DISP1_OK
+│       │   ├── DISP2_OK
+│       │   └── VCC_V
+│       │
+│       └── SD Failure Handling
+│           ├── SD.open() failure detected
+│           ├── SD_OK = 0
+│           ├── SD logging disabled
+│           ├── Main logger operation continues
+│           └── Reinsert SD + RESET to resume logging
 │
 ├── SYSTEM HEARTBEAT
 │   └── External LED → D9
@@ -107,9 +133,11 @@ Temp/Humi Logger v1.2.3
     │
     ├── wdt_reset()
     │
-    ├── DHT22 session scheduler
+    ├── Sensor session scheduler
     │
-    ├── DHT22 retry state machine
+    ├── Common sensor retry state machine
+    │   ├── DHT22 read path
+    │   └── SHT41 read path
     │
     ├── Process completed sensor result
     │   ├── Read RTC timestamp
@@ -118,25 +146,10 @@ Temp/Humi Logger v1.2.3
     │   ├── Check low VCC
     │   ├── Update temperature display
     │   ├── Update humidity display
-    │   └── Write CSV record
+    │   └── Write CSV record if SD available
     │
     ├── RTC clock display scheduler
     │   └── Every 250 ms
     │
     └── Heartbeat scheduler
         └── Every 1000 ms
-
-
-
-reliability architecture
-
-Temp/Humi Logger Reliability
-│
-├── Communication Protection
-│   └── I²C timeout + TWI recovery
-│
-├── Power Monitoring
-│   └── VCC measurement + <4.5 V warning
-│
-└── Firmware Recovery
-    └── 8-second hardware watchdog
