@@ -31,10 +31,6 @@ Temp/Humi Logger v1.3.0 Reliability
 │   └── <4.5 V warning
 │
 ├── System Health Monitoring
-│   └── D9 heartbeat
-│       ├── Toggle every 1 second
-│       └── Visual main-loop activity indicator
-│
-└── Firmware Recovery
-    └── 8-second hardware watchdog
-        └── Automatic MCU reset if main loop hangs
+    └── D9 heartbeat
+        ├── Toggle every 1 second
+        └── Visual main-loop activity indicator
