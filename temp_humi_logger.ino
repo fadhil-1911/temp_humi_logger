@@ -23,7 +23,6 @@
 // Libraries
 //==========================================================
 #include <SmartTM1637.h>  // TM1637 display control
-#include <MyDHT22.h>      // DHT22 temperature and humidity sensor
 #include <Wire.h>         // I2C communication
 #include <RTClib.h>       // DS3231 RTC support
 #include <SdFat.h>        // SD card file system
@@ -48,19 +47,17 @@
 
 #define VERSION "v000"  // Firmware version shown during startup
 
-const uint8_t BME_ADDRESS = 0x76; // 76 for 4 pi. 77 for 6 pin
-
-// SET SENSOR
-//#define SENSOR_DHT22  // SET FOR DHT22
-#define SENSOR_BME280  // SET FOR BME280
+// SET SENSOR DHT22 OR SHT41
+#define SENSOR_DHT22
+//#define SENSOR_SHT41
 
 #ifdef SENSOR_DHT22
 #include <MyDHT22.h>
 #endif
 
-#ifdef SENSOR_BME280
+#ifdef SENSOR_SHT41
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
+#include <Adafruit_SHT4x.h>
 #endif
 
 //==========================================================
@@ -80,14 +77,14 @@ File logFile;    // SD log file object
 MyDHT22 dht(DHT_PIN);
 #endif
 
-#ifdef SENSOR_BME280
-Adafruit_BME280 bme;
+#ifdef SENSOR_SHT41
+Adafruit_SHT4x sht4;
 #endif
 
 //==========================================================
-// DHT22 Timing
+// SENSOR Timing
 //==========================================================
-unsigned long lastReadTimeSensor = 0;  // Time of the last completed DHT22 session
+unsigned long lastReadTimeSensor = 0;  // Time of the last completed SENSOR session
 
 //==========================================================
 // RTC Display Timing
@@ -102,16 +99,16 @@ unsigned long lastHeartbeat = 0;  // Last heartbeat toggle time
 bool heartbeatState = false;      // Current heartbeat LED state
 
 //==========================================================
-// DHT22 Non-Blocking Retry State
+// SENSOR Non-Blocking Retry State
 //==========================================================
-const int maxRetry = 3;                    // Maximum DHT22 read attempts
+const int maxRetry = 3;                    // Maximum SENSOR read attempts
 int retryCount = 0;                        // Current retry count
 unsigned long lastRetryTime = 0;           // Time of the previous retry attempt
 const unsigned long retryInterval = 2000;  // Delay between retry attempts
 
-bool readOK = false;           // True when the latest DHT22 read succeeds
+bool readOK = false;           // True when the latest SENSOR read succeeds
 bool retryInProgress = false;  // True while a retry session is active
-bool resultReady = false;      // True when a DHT22 session has completed
+bool resultReady = false;      // True when a SENSOR session has completed
 
 float temp = 0.0;  // Latest valid temperature value
 float humi = 0.0;  // Latest valid humidity value
@@ -119,11 +116,11 @@ float humi = 0.0;  // Latest valid humidity value
 //==========================================================
 // Device Status Flags
 //==========================================================
-bool sensorStatus = false;  // DHT22 read status
-bool rtcStatus = false;      // RTC read status
-bool sdStatus = false;       // SD card status
-bool disp1Status = false;    // Temperature display status
-bool disp2Status = false;    // Humidity display status
+bool sensorStatus = false;  // SENSOR read status
+bool rtcStatus = false;     // RTC read status
+bool sdStatus = false;      // SD card status
+bool disp1Status = false;   // Temperature display status
+bool disp2Status = false;   // Humidity display status
 
 //==========================================================
 // Setup
@@ -188,8 +185,8 @@ void setup() {
 
     if (logFile) {
       logFile.println(
-        "Date,Time,Temperature_C,Humidity_PCT,"
-        "DHT_OK,RTC_OK,SD_OK,DISP1_OK,DISP2_OK,VCC_V");
+        "Date,Time,Temp_C,Humi_PCT,"
+        "SENSOR_OK,RTC_OK,SD_OK,DISP1_OK,DISP2_OK,VCC_V");
 
       logFile.close();
     }
@@ -197,17 +194,19 @@ void setup() {
 
 
 
-  #ifdef SENSOR_DHT22
+#ifdef SENSOR_DHT22
   Serial.println(F("Sensor: DHT22"));
 #endif
 
-#ifdef SENSOR_BME280
-  Serial.println(F("Sensor: BME280"));
+#ifdef SENSOR_SHT41
+  Serial.println(F("Sensor: SHT41"));
 
-  if (!bme.begin(BME_ADDRESS)) { 
-    Serial.println(F("BME280 initialization failed!"));
+  sensorStatus = sht4.begin();
+
+  if (!sensorStatus) {
+    Serial.println(F("SHT41 initialization failed!"));
   } else {
-    Serial.println(F("BME280 initialization OK"));
+    Serial.println(F("SHT41 initialization OK"));
   }
 #endif
 
@@ -233,7 +232,7 @@ void loop() {
   unsigned long currentMillis = millis();
 
   //========================================================
-  // 1. Start a New DHT22 Reading Session
+  // 1. Start a New SENSOR Reading Session
   //========================================================
   // Begin a new session when:
   // - no retry session is active,
@@ -260,9 +259,9 @@ void loop() {
   }
 
   //========================================================
-  // 2. Process DHT22 Retry Attempts
+  // 2. Process SENSOR Retry Attempts
   //========================================================
-  // Attempt another DHT22 read when the retry interval has elapsed.
+  // Attempt another SENSOR read when the retry interval has elapsed.
   if (retryInProgress && currentMillis - lastRetryTime >= retryInterval) {
 
     lastRetryTime = currentMillis;
@@ -297,10 +296,14 @@ void loop() {
 #endif
 
 
-#ifdef SENSOR_BME280
+#ifdef SENSOR_SHT41
 
-    temp = bme.readTemperature();
-    humi = bme.readHumidity();
+    sensors_event_t humidity, temperature;
+
+    sht4.getEvent(&humidity, &temperature);
+
+    temp = temperature.temperature;
+    humi = humidity.relative_humidity;
 
     if (!isnan(temp) && !isnan(humi)) {
       sensorStatus = true;
@@ -311,7 +314,7 @@ void loop() {
     } else {
       retryCount++;
 
-      Serial.print(F("BME280 reading attempt failed: "));
+      Serial.print(F("SHT41 reading attempt failed: "));
       Serial.print(retryCount);
       Serial.print(F("/"));
       Serial.println(maxRetry);
@@ -335,7 +338,7 @@ void loop() {
     // Clear the result flag so this block runs only once per session.
     resultReady = false;
 
-    // Schedule the next DHT22 reading session relative to now.
+    // Schedule the next SENSOR reading session relative to now.
     lastReadTimeSensor = currentMillis;
 
     //======================================================
@@ -391,7 +394,7 @@ void loop() {
 
     // Warn when the measured 5 V rail drops below 4.5 V.
     if (vccVolts < 4.5) {
-      Serial.println("WARNING: Low VCC");
+      Serial.println(F("WARNING: Low VCC"));
     }
 
     //======================================================
@@ -408,17 +411,17 @@ void loop() {
       disp2Status = true;
 
       // Print the current measurement to Serial Monitor.
-      Serial.print("Temp: ");
+      Serial.print(F("Temp: "));
       Serial.print(temp, 1);
-      Serial.print(" | Humidity: ");
+      Serial.print(F(" | Humidity: "));
       Serial.print(humi, 1);
-      Serial.print(" | VCC: ");
+      Serial.print(F(" | VCC: "));
       Serial.print(vccVolts, 2);
-      Serial.println(" V");
+      Serial.println(F(" V"));
 
     } else {
 
-      // Show an error message when all DHT22 attempts fail.
+      // Show an error message when all SENSOR attempts fail.
       display_1.print("Err");
       display_2.print("Err");
 
@@ -426,7 +429,7 @@ void loop() {
       disp1Status = false;
       disp2Status = false;
 
-      Serial.println("❌ Failed to read DHT22 after 3 attempts");
+      Serial.println(F("❌ Failed to read SENSOR after 3 attempts"));
     }
 
     //======================================================
@@ -466,7 +469,7 @@ void loop() {
       //====================================================
       // Temperature
       //====================================================
-      // Write temperature only when the DHT22 reading is valid.
+      // Write temperature only when the SENSOR reading is valid.
       if (sensorStatus) {
         logFile.print(temp, 1);
       } else {
@@ -478,7 +481,7 @@ void loop() {
       //====================================================
       // Humidity
       //====================================================
-      // Write humidity only when the DHT22 reading is valid.
+      // Write humidity only when the SENSOR reading is valid.
       if (sensorStatus) {
         logFile.print(humi, 1);
       } else {
@@ -517,23 +520,23 @@ void loop() {
       // Serial Logging Status
       //====================================================
       if (sensorStatus && rtcStatus) {
-        Serial.println("✅ Log saved to SD card");
+        Serial.println(F("✅ Log saved to SD card"));
 
       } else if (!sensorStatus && !rtcStatus) {
-        Serial.println("⚠️ DHT22 and RTC failure logged");
+        Serial.println(F("⚠️ SENSOR and RTC failure logged"));
 
       } else if (!sensorStatus) {
-        Serial.println("⚠️ DHT22 failure logged");
+        Serial.println(F("⚠️ SENSOR failure logged"));
 
       } else {
-        Serial.println("⚠️ RTC failure logged");
+        Serial.println(F("⚠️ RTC failure logged"));
       }
 
     } else {
 
       // Mark the SD card unavailable if the log file cannot be opened.
       sdStatus = false;
-      Serial.println("❌ Failed to open log.csv");
+      Serial.println(F("❌ Failed to open log.csv"));
     }
   }
 
@@ -552,7 +555,7 @@ void loop() {
 
     // Check whether the RTC read caused an I2C timeout.
     if (Wire.getWireTimeoutFlag()) {
-      Serial.println("WARNING: I2C timeout");
+      Serial.println(F("WARNING: I2C timeout"));
 
       // Clear the timeout flag for future monitoring.
       Wire.clearWireTimeoutFlag();
