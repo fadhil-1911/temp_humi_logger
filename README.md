@@ -1,154 +1,57 @@
 # temp_humi_logger
 
-## Temp/Humi Logger v1.3.0
+## Temp/Humi Logger v1.2.3
 
-A reliable Arduino-based Temperature & Humidity Data Logger supporting **DHT22 or SHT41**, DS3231 Real-Time Clock (RTC), MicroSD card logging, and three TM1637 4-digit displays.
+A reliable Arduino-based Temperature & Humidity Data Logger featuring a DHT22 sensor, DS3231 Real-Time Clock (RTC), MicroSD card logging, and three TM1637 4-digit displays.
 
-Version 1.3.0 introduces **multi-sensor support**, adding the SHT41 as an alternative to the DHT22 while preserving the existing non-blocking architecture and reliability features. This release also improves sensor communication failure handling, SD fail-safe behavior, and SRAM usage.
+Version 1.2.3 focuses on long-run reliability, adding hardware watchdog recovery, I2C timeout protection, independent heartbeat monitoring, low-voltage diagnostics, and improved RTC handling.
 
 ---
 
 ## Features
 
-* Temperature and relative humidity measurement using **DHT22 or SHT41**
-* Compile-time sensor selection
+* Temperature measurement using DHT22
+* Relative humidity measurement
 * Accurate timestamps using DS3231 RTC
 * Automatic logging to MicroSD card
-* Live data display on three TM1637 4-digit displays
-* Non-blocking program architecture using `millis()`
-* Automatic sensor retry with a maximum of 3 attempts
-* SHT41 I2C communication failure detection
-* Generic `SENSOR_OK` status reporting
+* Live data display on TM1637 4-digit display
+* Non-blocking program architecture using millis()
+* Automatic DHT22 retry (maximum 3 attempts)
 * CSV-compatible log files
-* Independent main-loop heartbeat on D9
-* I2C timeout protection
-* Low-VCC monitoring
-* Fail-safe operation during sensor or SD logging failures
+* Improved reliability during sensor read failures
 
----
+⸻
 
-## Sensor Selection
-
-Version 1.3.0 supports two temperature and humidity sensors:
-
-* DHT22
-* SHT41
-
-Select **ONE sensor only** before compiling the firmware.
-
-```cpp
-//==========================================================
-// ****************** Sensor Selection *********************
-//==========================================================
-// Select ONE sensor only.
-//
-// Remove // to ENABLE the sensor.
-// Add    // to DISABLE the sensor.
-//
-// IMPORTANT: Enable only ONE sensor at a time.
-
-//#define SENSOR_DHT22   // DHT22 sensor
-#define SENSOR_SHT41     // SHT41 sensor
-```
-
-For example, the configuration above enables the **SHT41** and disables the **DHT22**.
-
----
-
-## What's New in v1.3.0
+## What’s New in v1.2.3
 
 ### Added
 
-* SHT41 temperature and humidity sensor support
-* Compile-time selection between DHT22 and SHT41
-* SHT41 initialization status checking
-* Explicit SHT41 I2C communication failure detection
-* SHT41 integration with the existing non-blocking 3-attempt retry mechanism
-* Generic `SENSOR_OK` status reporting for supported sensors
-* Fail-safe SD handling after a logging failure
-
-### Improved
-
-* Prevented failed SHT41 transactions from producing stale or invalid readings
-* Generalized sensor handling for DHT22 and SHT41
-* Improved sensor disconnect and recovery behavior
-* Sensor, RTC, display, and heartbeat operation continue after an SD logging failure
-* Optimized constant Serial strings using `F()` to reduce SRAM usage
-* Reduced SRAM usage from approximately **83% to 71%**
-* Increased available SRAM from approximately **330 bytes to 578 bytes**
-* Improved memory headroom for long-run operation
-
----
-
-## SD Card Behavior
-
-The MicroSD card is **not hot-swappable** in v1.3.0.
-
-If the SD card is removed or SD logging fails during operation:
-
-* SD logging is disabled
-* Temperature and humidity measurement continues
-* RTC operation continues
-* Displays continue updating
-* Main-loop heartbeat continues operating
-
-To resume SD logging:
-
-1. Reinsert the MicroSD card
-2. Press the Arduino RESET button
-3. The SD card will be initialized again and logging will resume
-
-Automatic SD re-initialization is intentionally not used because repeated SD initialization attempts while the card is unavailable may block the main loop and interfere with display and heartbeat operation.
-
----
-
-## Reliability Features
-
-The reliability improvements introduced in v1.2.3 remain available in v1.3.0:
-
+* 8-second hardware watchdog recovery
 * Independent main-loop heartbeat on D9
 * I2C timeout protection with automatic TWI recovery
-* I2C bus operating at 100 kHz
-* Reduced RTC polling frequency
 * Low-VCC warning below 4.5 V
 * RTC timeout detection during logging
 * `NA` timestamp logging when RTC data is invalid
-* CSV device status flags
-* Non-blocking sensor retry architecture
 
----
+### Improved
 
-## Hardware-Tested Failure Handling
-
-The following behaviors have been tested on real hardware:
-
-* DHT22 firmware build — **PASS**
-* SHT41 firmware build — **PASS**
-* SHT41 normal measurement — **PASS**
-* SHT41 disconnect detection — **PASS**
-* SHT41 3-attempt retry — **PASS**
-* SHT41 reconnection recovery — **PASS**
-* SD logging failure detection — **PASS**
-* Logger continues operating after SD removal — **PASS**
-* SD logging resumes after SD reinsertion and MCU reset — **PASS**
-
-Version 1.3.0 therefore extends the Temp/Humi Logger from a DHT22-specific logger into a more flexible **multi-sensor platform** while maintaining the reliability-oriented architecture introduced in v1.2.3.
-
+* Reduced I2C bus speed to 100 kHz for better stability
+* Reduced RTC polling frequency to minimize I2C traffic
+* Improved long-run reliability and freeze recovery
+* Improved separation between sensor, clock, logging, and heartbeat tasks
 
 ⸻
 
 ## Hardware
 
 * Arduino Uno / Nano (or compatible)
-* Temperature & Humidity Sensor — choose ONE:
-  * DHT22 Temperature & Humidity Sensor
-  * SHT41 Temperature & Humidity Sensor
+* DHT22 Temperature & Humidity Sensor
 * DS3231 RTC Module
 * MicroSD Card Module
+* TM1637 4-Digit Display 1 Tempearture (dot version)
+* TM1637 4-Digit Display 2 Huminity (dot version)
+* TM1637 4-Digit Display 3 Clock (semi colon version)
 * MicroSD Card
-* TM1637 4-Digit Display 1 — Temperature (dot version)
-* TM1637 4-Digit Display 2 — Humidity (dot version)
-* TM1637 4-Digit Display 3 — Clock (colon version)
 * Jumper wires
 * 5V power supply
 
@@ -158,37 +61,21 @@ Version 1.3.0 therefore extends the Temp/Humi Logger from a DHT22-specific logge
 
 This project requires the following Arduino libraries:
 
-### Core Libraries
-
 - SmartTM1637
+- MyDHT22
 - RTClib
 - SdFat
-
-### Sensor Libraries
-
-Install the library required for the sensor you want to use:
-
-**For DHT22:**
-- MyDHT22
-
-**For SHT41:**
-- Adafruit SHT4x
-- Adafruit Unified Sensor
-
-### Built-in Libraries
-
 - Wire (built into the Arduino IDE)
+- AVR Watchdog (`avr/wdt.h`, included with the AVR toolchain)
 
 Install the required third-party libraries using the Arduino Library Manager before compiling.
 
 The `Wire` library is included with the Arduino IDE, while `avr/wdt.h` is provided by the AVR core/toolchain and does not require separate installation.
-
-Only the library for the selected temperature and humidity sensor is included during compilation through the firmware's compile-time sensor selection.
 ⸻
 
 ## Data Logging
 
-Each completed sensor reading cycle is automatically stored on the SD card in CSV format.
+Each completed reading cycle is automatically stored on the SD card in CSV format.
 
 The log file contains:
 
@@ -196,96 +83,78 @@ The log file contains:
 - Time
 - Temperature (°C)
 - Humidity (%RH)
-- Sensor status (`SENSOR_OK`)
-- RTC status (`RTC_OK`)
-- SD card status (`SD_OK`)
-- Display #1 status (`DISP1_OK`)
-- Display #2 status (`DISP2_OK`)
-- Supply voltage (`VCC_V`)
+- DHT22 status
+- RTC status
+- SD card status
+- Display #1 status
+- Display #2 status
+- Supply voltage (VCC)
 
 Example of a normal reading:
 ```text
-2026-08-26,14:35:10,29.6,71.8,1,1,1,1,1,4.97
+2026-08-14,14:35:10,29.6,71.8,1,1,1,1,1,4.97
 ```
-If the selected sensor (DHT22 or SHT41) fails after all retry attempts, temperature and humidity are recorded as NA:
+If a DHT22 reading fails after all retry attempts, temperature and humidity are recorded as NA:
+```text
+2026-08-14,14:35:10,NA,NA,0,1,1,0,0,4.97
 ```
-2026-08-26,14:35:10,NA,NA,0,1,1,0,0,4.97
-```
-
 If the RTC reading is invalid or an I2C timeout occurs, the date and time are recorded as NA:
-```
+```text
 NA,NA,29.6,71.8,1,0,1,1,1,4.97
 ```
 
-If both the sensor and RTC readings fail:
-```
-
+If both the DHT22 and RTC readings fail:
+```text
 NA,NA,NA,NA,0,0,1,0,0,4.97
 ```
-
 Status values use:
-```
-
 1 = OK
 0 = Failed
-```
 
-Invalid sensor measurements or timestamps are stored as NA instead of potentially incorrect data.
-
-Note: The MicroSD card is not hot-swappable in v1.3.0.
-If the SD card is removed during operation, logging stops while the sensor, RTC, displays, and heartbeat continue operating. Reinsert the SD card and press RESET to resume logging.
+Invalid measurement or timestamp fields are stored as NA instead of potentially incorrect data.
 
 ⸻
 
-## Sensor Retry Mechanism
+## DHT22 Retry Mechanism
 
-Version 1.3.0 uses a common non-blocking retry mechanism for both supported temperature and humidity sensors:
+Version 1.2.3 retains and improves the non-blocking DHT22 retry system.
 
-DHT22
-SHT41
-Workflow
-Start a new sensor reading session.
-Attempt to read temperature and humidity.
-If the reading succeeds:
-Store the latest temperature and humidity values.
-Update the temperature and humidity displays.
-Set SENSOR_OK = 1.
-Save the measurement to the SD card.
-If the reading fails:
-Wait for the configured retry interval.
-Retry automatically without blocking the main loop.
-Maximum retry attempts: 3.
-If all retry attempts fail:
-Record NA for temperature and humidity.
-Set SENSOR_OK = 0.
-Display an error indication.
-Continue normal system operation.
-A new sensor reading session will be attempted automatically during the next cycle.
+Workflow:
 
-For SHT41, the firmware also checks the result of the I2C communication before accepting the temperature and humidity values. This prevents failed communication from being interpreted as a valid or stale measurement.
+1. Start a new DHT22 reading session.
+2. Attempt to read temperature and humidity.
+3. If the reading succeeds:
+   - Store the latest Temperature and Humidity values.
+   - Update the temperature and humidity displays.
+   - Set `DHT_OK = 1`.
+   - Save the measurement to the SD card.
+4. If the reading fails:
+   - Wait for the configured retry interval.
+   - Retry automatically without blocking the main loop.
+5. Maximum retry attempts: **3**.
+6. If all retry attempts fail:
+   - Record `NA` for Temperature and Humidity.
+   - Set `DHT_OK = 0` in the log file.
+   - Display an error indication.
+   - Continue normal system operation.
 
-The retry process uses a non-blocking state-based approach, allowing other tasks such as RTC updates, clock display refresh, heartbeat monitoring, and watchdog servicing to continue while waiting between sensor retry attempts.
+The retry process is handled using a non-blocking state-based approach, allowing other tasks such as RTC updates, clock display refresh, heartbeat monitoring, and watchdog servicing to continue running while the DHT22 retry process is active.
 
-This allows the logger to recover automatically from temporary sensor communication failures without stopping the entire system.
+This improves long-term reliability by allowing the logger to recover from temporary sensor communication errors without stopping the entire system.
 
-Advantages
-Supports both DHT22 and SHT41 sensors
-Simple compile-time sensor selection
-Common SENSOR_OK status reporting
-Non-blocking sensor retry handling
-Automatic sensor recovery after temporary communication failures
-SHT41 communication failure detection
-Protection against stale or invalid SHT41 readings
-Improved multitasking and responsiveness
-Fail-safe operation after SD logging failure
-Hardware watchdog recovery
-I2C timeout protection
-Independent heartbeat monitoring
-Low-voltage monitoring for power diagnostics
-Reduced SRAM usage through Flash-stored constant strings
-CSV status flags for easier diagnostics
-Easier debugging and maintenance
-Ready for future sensor and feature expansion
+⸻
+
+## Advantages
+
+* Non-blocking sensor retry handling
+* Improved multitasking and responsiveness
+* Better long-term logging stability
+* Automatic recovery from firmware hangs using the hardware watchdog
+* Improved I2C reliability with timeout protection
+* Independent heartbeat monitoring
+* Low-voltage monitoring for easier power diagnostics
+* Easier debugging and maintenance
+* Ready for future feature expansion
 
 ⸻
 
@@ -306,6 +175,7 @@ Ready for future sensor and feature expansion
 
 ## Pin Configuration
 
+
             +----------------------+
             |   Arduino Uno/Nano   |
             +----------------------+
@@ -318,54 +188,23 @@ Ready for future sensor and feature expansion
       D6  ----------------> TM1637 #3 CLK
       D7  ----------------> TM1637 #3 DIO
 
-      D8  ----------------> DHT22 DATA (DHT22 only)
-      D9  ----------------> Heartbeat LED indicator
-
+      D8  ----------------> DHT22 DATA
+      D9 -----------------> Heartbeat LED indicator
       D10 ----------------> SD Card CS
       D11 ----------------> SD Card MOSI
       D12 ----------------> SD Card MISO
       D13 ----------------> SD Card SCK
 
-      A4  ----------------> DS3231 SDA + SHT41 SDA
-      A5  ----------------> DS3231 SCL + SHT41 SCL
+      A4  ----------------> DS3231 SDA
+      A5  ----------------> DS3231 SCL
 
-Sensor Connections
+Note
 
-DHT22
-```
-
-D8  ----------------> DHT22 DATA
-5V  ----------------> DHT22 VCC
-GND ----------------> DHT22 GND
-```
-
-SHT41
-```
-
-A4  ----------------> SHT41 SDA
-A5  ----------------> SHT41 SCL
-5V* ----------------> SHT41 VCC
-GND ----------------> SHT41 GND
-```
-
-Important: Select and use only one temperature/humidity sensor configuration at a time (DHT22 or SHT41).
-
-Notes
-
-The DS3231 RTC and SHT41 communicate over the same I²C bus using A4 (SDA) and A5 (SCL) on the Arduino Uno/Nano.
-
-The MicroSD module uses the Arduino hardware SPI interface:
-```
-D10 — CS
-D11 — MOSI
-D12 — MISO
-D13 — SCK
-```
-D8 is only used when the DHT22 configuration is enabled. When SHT41 is selected, D8 is not used by the temperature/humidity sensor.
+The DS3231 RTC communicates over the I²C bus (A4/A5 on Arduino Uno/Nano), while the MicroSD module uses the hardware SPI interface (D10–D13).
 
 ## Wiring Diagram
 
-![Arduino Nano Wiring Diagram](docs/wiring/wirng_v1.2.3.png)
+![Arduino Nano Wiring Diagram](docs/wiring/temp_humi_logger_arduino_nano.png)
 ⸻
 
 ## Program Flow
@@ -376,23 +215,6 @@ The complete DHT22 loop operation and program flow are documented separately.
 ⸻
 
 ## Version History
-
-### v1.3.0
-
-- Added SHT41 temperature and humidity sensor support
-- Added compile-time sensor selection between DHT22 and SHT41
-- Added SHT41 initialization and I2C communication failure detection
-- Integrated SHT41 with the existing non-blocking 3-attempt retry mechanism
-- Prevented failed SHT41 transactions from producing stale or invalid readings
-- Generalized sensor status reporting from `DHT_OK` to `SENSOR_OK`
-- Generalized sensor retry and logging logic for multi-sensor operation
-- Added fail-safe SD handling after a logging failure
-- Logger continues sensor, RTC, display, and heartbeat operation after SD logging failure
-- SD logging remains disabled after a card failure until the logger is reset
-- Optimized constant Serial strings using `F()` to reduce SRAM usage
-- Improved available SRAM and memory headroom
-- Preserved watchdog, I2C timeout, heartbeat, RTC, VCC, and CSV diagnostic features from v1.2.3
-- Removed 8-second hardware watchdog recovery due to stability issues
 
 ### v1.2.3
 

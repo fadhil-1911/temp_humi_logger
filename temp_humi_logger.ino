@@ -16,7 +16,7 @@
   - Moved the heartbeat LED to D9 to avoid SPI SCK conflict on D13.
   - Added low-VCC warning below 4.5 V.
   - Log "NA" when the RTC timestamp is invalid.
-  - Removed 8-second hardware watchdog recovery due to stability issues
+  - Preserve RTC, DHT22, SD, and display status flags in the CSV log.
 */
 
 //==========================================================
