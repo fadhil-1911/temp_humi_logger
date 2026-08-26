@@ -370,9 +370,9 @@ D8 is only used when the DHT22 configuration is enabled. When SHT41 is selected,
 
 ## Program Flow
 
-The complete DHT22 loop operation and program flow are documented separately.
+The complete sensor loop operation and program flow are documented separately.
 
-[View DHT22 Loop Operation](docs/flowcharts/loop operation.md)
+[View Loop Operation](docs/flowcharts/loop-operation.md)
 ⸻
 
 ## Version History
