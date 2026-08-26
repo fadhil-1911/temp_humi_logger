@@ -1,33 +1,32 @@
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //                  Temp/Humi Logger
-//                   Version: 1.2.3
+//                   Version: 1.3.0
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 /*
-  Project : Temp/Humi Logger with RTC + DHT22 + SD + TM1637
-  Version : 1.2.3
-  Date    : 2026-08-14
+  Project : Temp/Humi Logger with RTC + DHT22/SHT41 + SD + TM1637
+  Version : 1.3.0
+  Date    : 2026-08-26
 
-  Reliability updates:
-  - Added 8-second hardware watchdog recovery.
-  - Added periodic watchdog reset in the main loop.
-  - Added I2C timeout protection.
-  - Reduced I2C bus speed to 100 kHz for improved stability.
-  - Limited RTC polling frequency to reduce I2C traffic.
-  - Moved the heartbeat LED to D9 to avoid SPI SCK conflict on D13.
-  - Added low-VCC warning below 4.5 V.
-  - Log "NA" when the RTC timestamp is invalid.
-  - Preserve RTC, DHT22, SD, and display status flags in the CSV log.
+Updates: - Added SHT41 temperature and humidity sensor support. 
+- Added compile-time selection between DHT22 and SHT41. 
+- Added SHT41 initialization and communication failure detection. 
+- Integrated SHT41 with the existing non-blocking 3-attempt retry mechanism. 
+- Prevented failed SHT41 transactions from producing stale or invalid readings. 
+- Generalized sensor status reporting using SENSOR_OK. 
+- Added fail-safe SD handling so sensor, RTC, display, and heartbeat continue 
+- operating after an SD logging failure. 
+- SD logging is disabled after a card failure until the logger is reset. 
+- Optimized constant Serial strings with F() to reduce SRAM usage. 
+- Removed 8-second hardware watchdog recovery due to stability issues
 */
 
 //==========================================================
 // Libraries
 //==========================================================
 #include <SmartTM1637.h>  // TM1637 display control
-#include <MyDHT22.h>      // DHT22 temperature and humidity sensor
 #include <Wire.h>         // I2C communication
 #include <RTClib.h>       // DS3231 RTC support
 #include <SdFat.h>        // SD card file system
-#include <avr/wdt.h>      // AVR hardware watchdog timer
 
 //==========================================================
 // Pin Configuration
@@ -35,18 +34,46 @@
 #define HEARTBEAT_LED 9  // External heartbeat LED
 #define DHT_PIN 8        // DHT22 data pin
 
-#define CLK_PIN_1 2      // TM1637 display 1 clock pin
-#define DIO_PIN_1 3      // TM1637 display 1 data pin
+#define CLK_PIN_1 2  // TM1637 display 1 clock pin
+#define DIO_PIN_1 3  // TM1637 display 1 data pin
 
-#define CLK_PIN_2 4      // TM1637 display 2 clock pin
-#define DIO_PIN_2 5      // TM1637 display 2 data pin
+#define CLK_PIN_2 4  // TM1637 display 2 clock pin
+#define DIO_PIN_2 5  // TM1637 display 2 data pin
 
-#define CLK_PIN_3 6      // TM1637 display 3 clock pin
-#define DIO_PIN_3 7      // TM1637 display 3 data pin
+#define CLK_PIN_3 6  // TM1637 display 3 clock pin
+#define DIO_PIN_3 7  // TM1637 display 3 data pin
 
-#define CS_PIN 10        // SD card SPI chip-select pin
+#define CS_PIN 10  // SD card SPI chip-select pin
 
-#define VERSION "v123"   // Firmware version shown during startup
+#define VERSION "v130"  // Firmware version shown during startup
+
+
+//==========================================================
+// ****************** Sensor Selection *********************
+//==========================================================
+// Select ONE sensor only.
+//
+// Remove // to ENABLE the sensor.
+// Add    // to DISABLE the sensor.
+//
+// Example:
+// #define SENSOR_DHT22   -> DHT22 enabled
+// //#define SENSOR_DHT22 -> DHT22 disabled
+//
+// IMPORTANT: Enable only ONE sensor at a time.
+
+//#define SENSOR_DHT22   // DHT22 sensor
+#define SENSOR_SHT41  // SHT41 sensor
+
+//========================================================
+#ifdef SENSOR_DHT22
+#include <MyDHT22.h>
+#endif
+
+#ifdef SENSOR_SHT41
+#include <Adafruit_Sensor.h>
+#include <Adafruit_SHT4x.h>
+#endif
 
 //==========================================================
 // Device Objects
@@ -55,21 +82,29 @@ SmartTM1637 display_1(CLK_PIN_1, DIO_PIN_1);  // Temperature display
 SmartTM1637 display_2(CLK_PIN_2, DIO_PIN_2);  // Humidity display
 SmartTM1637 display_3(CLK_PIN_3, DIO_PIN_3);  // RTC clock display
 
-MyDHT22 dht(DHT_PIN);  // DHT22 sensor object
-RTC_DS3231 rtc;        // DS3231 RTC object
-SdFat SD;              // SD card file-system object
-File logFile;          // SD log file object
+RTC_DS3231 rtc;  // DS3231 RTC object
+SdFat SD;        // SD card file-system object
+File logFile;    // SD log file object
+
+
+#ifdef SENSOR_DHT22
+MyDHT22 dht(DHT_PIN);
+#endif
+
+#ifdef SENSOR_SHT41
+Adafruit_SHT4x sht4;
+#endif
 
 //==========================================================
-// DHT22 Timing
+// SENSOR Timing
 //==========================================================
-unsigned long lastReadTimeDHT22 = 0;  // Time of the last completed DHT22 session
+unsigned long lastReadTimeSensor = 0;  // Time of the last completed SENSOR session
 
 //==========================================================
 // RTC Display Timing
 //==========================================================
-unsigned long lastClockUpdate = 0;                // Last clock display update time
-const unsigned long clockUpdateInterval = 250;   // Update clock display every 250 ms
+unsigned long lastClockUpdate = 0;              // Last clock display update time
+const unsigned long clockUpdateInterval = 250;  // Update clock display every 250 ms
 
 //==========================================================
 // Heartbeat Timing
@@ -78,36 +113,33 @@ unsigned long lastHeartbeat = 0;  // Last heartbeat toggle time
 bool heartbeatState = false;      // Current heartbeat LED state
 
 //==========================================================
-// DHT22 Non-Blocking Retry State
+// SENSOR Non-Blocking Retry State
 //==========================================================
-const int maxRetry = 3;                         // Maximum DHT22 read attempts
-int retryCount = 0;                             // Current retry count
-unsigned long lastRetryTime = 0;                // Time of the previous retry attempt
-const unsigned long retryInterval = 2000;       // Delay between retry attempts
+const int maxRetry = 3;                    // Maximum SENSOR read attempts
+int retryCount = 0;                        // Current retry count
+unsigned long lastRetryTime = 0;           // Time of the previous retry attempt
+const unsigned long retryInterval = 2000;  // Delay between retry attempts
 
-bool readOK = false;                            // True when the latest DHT22 read succeeds
-bool retryInProgress = false;                   // True while a retry session is active
-bool resultReady = false;                       // True when a DHT22 session has completed
+bool readOK = false;           // True when the latest SENSOR read succeeds
+bool retryInProgress = false;  // True while a retry session is active
+bool resultReady = false;      // True when a SENSOR session has completed
 
-float temp = 0.0;                               // Latest valid temperature value
-float humi = 0.0;                               // Latest valid humidity value
+float temp = 0.0;  // Latest valid temperature value
+float humi = 0.0;  // Latest valid humidity value
 
 //==========================================================
 // Device Status Flags
 //==========================================================
-bool dhtStatus = false;    // DHT22 read status
-bool rtcStatus = false;    // RTC read status
-bool sdStatus = false;     // SD card status
-bool disp1Status = false;  // Temperature display status
-bool disp2Status = false;  // Humidity display status
+bool sensorStatus = false;  // SENSOR read status
+bool rtcStatus = false;     // RTC read status
+bool sdStatus = false;      // SD card status
+bool disp1Status = false;   // Temperature display status
+bool disp2Status = false;   // Humidity display status
 
 //==========================================================
 // Setup
 //==========================================================
 void setup() {
-
-  // Disable the watchdog during system initialization.
-  wdt_disable();
 
   // Initialize serial communication for diagnostics.
   Serial.begin(9600);
@@ -149,35 +181,51 @@ void setup() {
   sdStatus = SD.begin(CS_PIN);
 
   if (!sdStatus) {
-    Serial.println("❌ Failed to initialize SD card!");
+    Serial.println(F("❌ Failed to initialize SD card!"));
     display_1.print("SdEr");
   } else {
-    Serial.println("✅ SD Card OK");
+    Serial.println(F("✅ SD Card OK"));
   }
 
   //========================================================
   // Create CSV Header
   //========================================================
   // Create log.csv only when it does not already exist.
-  if (!SD.exists("log.csv")) {
+  if (sdStatus && !SD.exists("log.csv")) {
     logFile = SD.open("log.csv", FILE_WRITE);
 
     if (logFile) {
       logFile.println(
-        "Date,Time,Temperature_C,Humidity_PCT,"
-        "DHT_OK,RTC_OK,SD_OK,DISP1_OK,DISP2_OK,VCC_V"
-      );
+        "Date,Time,Temp_C,Humi_PCT,"
+        "SENSOR_OK,RTC_OK,SD_OK,DISP1_OK,DISP2_OK,VCC_V");
 
       logFile.close();
     }
   }
+
+
+
+#ifdef SENSOR_DHT22
+  Serial.println(F("Sensor: DHT22"));
+#endif
+
+#ifdef SENSOR_SHT41
+  Serial.println(F("Sensor: SHT41"));
+
+  sensorStatus = sht4.begin();
+
+  if (!sensorStatus) {
+    Serial.println(F("SHT41 initialization failed!"));
+  } else {
+    Serial.println(F("SHT41 initialization OK"));
+  }
+#endif
 
   // Allow startup messages to remain visible before normal operation.
   delay(3000);
 
   // Enable the hardware watchdog.
   // The MCU will reset if the main loop stops servicing it for 8 seconds.
-  wdt_enable(WDTO_8S);
 }
 
 //==========================================================
@@ -185,32 +233,25 @@ void setup() {
 //==========================================================
 void loop() {
 
-  // Confirm that the main loop is still running.
-  // If execution becomes blocked for more than 8 seconds,
-  // the watchdog will automatically reset the MCU.
-  wdt_reset();
-
   // Capture millis() once and reuse it throughout this loop iteration.
   unsigned long currentMillis = millis();
 
   //========================================================
-  // 1. Start a New DHT22 Reading Session
+  // 1. Start a New SENSOR Reading Session
   //========================================================
   // Begin a new session when:
   // - no retry session is active,
   // - no completed result is waiting to be processed,
   // - at least 2 seconds have passed since the previous session.
-  if (!retryInProgress &&
-      !resultReady &&
-      currentMillis - lastReadTimeDHT22 >= 2000) {
+  if (!retryInProgress && !resultReady && currentMillis - lastReadTimeSensor >= 2000) {
 
     // Record the start time of this reading session.
-    lastReadTimeDHT22 = currentMillis;
+    lastReadTimeSensor = currentMillis;
 
     // Reset the retry and result states.
     retryCount = 0;
     readOK = false;
-    dhtStatus = false;
+    sensorStatus = false;
     disp1Status = false;
     disp2Status = false;
 
@@ -223,61 +264,106 @@ void loop() {
   }
 
   //========================================================
-  // 2. Process DHT22 Retry Attempts
+  // 2. Process SENSOR Retry Attempts
   //========================================================
-  // Attempt another DHT22 read when the retry interval has elapsed.
-  if (retryInProgress &&
-      currentMillis - lastRetryTime >= retryInterval) {
+  // Attempt another SENSOR read when the retry interval has elapsed.
+  if (retryInProgress && currentMillis - lastRetryTime >= retryInterval) {
 
-    // Record the time of this retry attempt.
     lastRetryTime = currentMillis;
 
-    // Attempt to read the DHT22 sensor.
-    if (dht.readData()) {
+#ifdef SENSOR_DHT22
 
-      // Store the latest valid sensor values.
+    if (dht.readData()) {
       temp = dht.getTemperature();
       humi = dht.getHumidity();
 
-      // Mark the sensor read as successful.
-      dhtStatus = true;
+      sensorStatus = true;
       readOK = true;
-
-      // End the retry session and make the result available.
       retryInProgress = false;
       resultReady = true;
 
     } else {
-
-      // Count the failed read attempt.
       retryCount++;
 
-      // Report the failed attempt through Serial Monitor.
-      Serial.print("DHT22 reading attempt failed: ");
+      Serial.print(F("DHT22 reading attempt failed: "));
       Serial.print(retryCount);
-      Serial.print("/");
+      Serial.print(F("/"));
       Serial.println(maxRetry);
 
-      // Stop retrying after the maximum number of attempts.
       if (retryCount >= maxRetry) {
-        dhtStatus = false;
+        sensorStatus = false;
         readOK = false;
         retryInProgress = false;
         resultReady = true;
       }
     }
+
+#endif
+
+
+#ifdef SENSOR_SHT41
+
+    sensors_event_t humidity, temperature;
+
+    bool shtReadOK = sht4.getEvent(&humidity, &temperature);
+
+    if (shtReadOK) {
+
+      temp = temperature.temperature;
+      humi = humidity.relative_humidity;
+
+      if (!isnan(temp) && !isnan(humi)) {
+        sensorStatus = true;
+        readOK = true;
+        retryInProgress = false;
+        resultReady = true;
+
+      } else {
+        retryCount++;
+
+        Serial.print(F("SHT41 invalid reading: "));
+        Serial.print(retryCount);
+        Serial.print(F("/"));
+        Serial.println(maxRetry);
+
+        if (retryCount >= maxRetry) {
+          sensorStatus = false;
+          readOK = false;
+          retryInProgress = false;
+          resultReady = true;
+        }
+      }
+
+    } else {
+
+      retryCount++;
+
+      Serial.print(F("SHT41 communication failed: "));
+      Serial.print(retryCount);
+      Serial.print(F("/"));
+      Serial.println(maxRetry);
+
+      if (retryCount >= maxRetry) {
+        sensorStatus = false;
+        readOK = false;
+        retryInProgress = false;
+        resultReady = true;
+      }
+    }
+
+#endif
   }
 
   //========================================================
-  // 3. Process the Completed DHT22 Result
+  // 3. Process the Completed Sensor Result
   //========================================================
   if (resultReady) {
 
     // Clear the result flag so this block runs only once per session.
     resultReady = false;
 
-    // Schedule the next DHT22 reading session relative to now.
-    lastReadTimeDHT22 = currentMillis;
+    // Schedule the next SENSOR reading session relative to now.
+    lastReadTimeSensor = currentMillis;
 
     //======================================================
     // 3.1 Read RTC Timestamp
@@ -311,8 +397,7 @@ void loop() {
       "%04d-%02d-%02d",
       now.year(),
       now.month(),
-      now.day()
-    );
+      now.day());
 
     // Format the RTC time as HH:MM:SS.
     snprintf(
@@ -321,8 +406,7 @@ void loop() {
       "%02d:%02d:%02d",
       now.hour(),
       now.minute(),
-      now.second()
-    );
+      now.second());
 
     //======================================================
     // 3.2 Measure MCU Supply Voltage
@@ -334,7 +418,7 @@ void loop() {
 
     // Warn when the measured 5 V rail drops below 4.5 V.
     if (vccVolts < 4.5) {
-      Serial.println("WARNING: Low VCC");
+      Serial.println(F("WARNING: Low VCC"));
     }
 
     //======================================================
@@ -351,17 +435,17 @@ void loop() {
       disp2Status = true;
 
       // Print the current measurement to Serial Monitor.
-      Serial.print("Temp: ");
+      Serial.print(F("Temp: "));
       Serial.print(temp, 1);
-      Serial.print(" | Humidity: ");
+      Serial.print(F(" | Humidity: "));
       Serial.print(humi, 1);
-      Serial.print(" | VCC: ");
+      Serial.print(F(" | VCC: "));
       Serial.print(vccVolts, 2);
-      Serial.println(" V");
+      Serial.println(F(" V"));
 
     } else {
 
-      // Show an error message when all DHT22 attempts fail.
+      // Show an error message when all SENSOR attempts fail.
       display_1.print("Err");
       display_2.print("Err");
 
@@ -369,114 +453,95 @@ void loop() {
       disp1Status = false;
       disp2Status = false;
 
-      Serial.println("❌ Failed to read DHT22 after 3 attempts");
+      Serial.println(F("❌ Failed to read SENSOR after 3 attempts"));
     }
 
     //======================================================
     // 3.4 Open CSV Log File
     //======================================================
-    logFile = SD.open("log.csv", FILE_WRITE);
+    if (sdStatus) {
 
-    if (logFile) {
+      logFile = SD.open("log.csv", FILE_WRITE);
 
-      // Mark the SD card as available for this logging cycle.
-      sdStatus = true;
+      if (logFile) {
 
-      //====================================================
-      // Date
-      //====================================================
-      // Write the RTC date only when the RTC status is valid.
-      if (rtcStatus) {
-        logFile.print(dateStr);
-      } else {
-        logFile.print("NA");
-      }
+        sdStatus = true;
 
-      logFile.print(",");
+        // Date
+        if (rtcStatus) {
+          logFile.print(dateStr);
+        } else {
+          logFile.print("NA");
+        }
 
-      //====================================================
-      // Time
-      //====================================================
-      // Write the RTC time only when the RTC status is valid.
-      if (rtcStatus) {
-        logFile.print(timeStr);
-      } else {
-        logFile.print("NA");
-      }
+        logFile.print(",");
 
-      logFile.print(",");
+        // Time
+        if (rtcStatus) {
+          logFile.print(timeStr);
+        } else {
+          logFile.print("NA");
+        }
 
-      //====================================================
-      // Temperature
-      //====================================================
-      // Write temperature only when the DHT22 reading is valid.
-      if (dhtStatus) {
-        logFile.print(temp, 1);
-      } else {
-        logFile.print("NA");
-      }
+        logFile.print(",");
 
-      logFile.print(",");
+        // Temperature
+        if (sensorStatus) {
+          logFile.print(temp, 1);
+        } else {
+          logFile.print("NA");
+        }
 
-      //====================================================
-      // Humidity
-      //====================================================
-      // Write humidity only when the DHT22 reading is valid.
-      if (dhtStatus) {
-        logFile.print(humi, 1);
-      } else {
-        logFile.print("NA");
-      }
+        logFile.print(",");
 
-      //====================================================
-      // Device Status Flags
-      //====================================================
-      logFile.print(",");
-      logFile.print(dhtStatus ? "1" : "0");
+        // Humidity
+        if (sensorStatus) {
+          logFile.print(humi, 1);
+        } else {
+          logFile.print("NA");
+        }
 
-      logFile.print(",");
-      logFile.print(rtcStatus ? "1" : "0");
+        // Device Status Flags
+        logFile.print(",");
+        logFile.print(sensorStatus ? "1" : "0");
 
-      logFile.print(",");
-      logFile.print(sdStatus ? "1" : "0");
+        logFile.print(",");
+        logFile.print(rtcStatus ? "1" : "0");
 
-      logFile.print(",");
-      logFile.print(disp1Status ? "1" : "0");
+        logFile.print(",");
+        logFile.print(sdStatus ? "1" : "0");
 
-      logFile.print(",");
-      logFile.print(disp2Status ? "1" : "0");
+        logFile.print(",");
+        logFile.print(disp1Status ? "1" : "0");
 
-      //====================================================
-      // VCC
-      //====================================================
-      // Append the measured MCU supply voltage and end the CSV row.
-      logFile.print(",");
-      logFile.println(vccVolts, 2);
+        logFile.print(",");
+        logFile.print(disp2Status ? "1" : "0");
 
-      // Flush the current row and release the file handle.
-      logFile.close();
+        // VCC
+        logFile.print(",");
+        logFile.println(vccVolts, 2);
 
-      //====================================================
-      // Serial Logging Status
-      //====================================================
-      if (dhtStatus && rtcStatus) {
-        Serial.println("✅ Log saved to SD card");
+        logFile.close();
 
-      } else if (!dhtStatus && !rtcStatus) {
-        Serial.println("⚠️ DHT22 and RTC failure logged");
+        if (sensorStatus && rtcStatus) {
+          Serial.println(F("✅ Log saved to SD card"));
 
-      } else if (!dhtStatus) {
-        Serial.println("⚠️ DHT22 failure logged");
+        } else if (!sensorStatus && !rtcStatus) {
+          Serial.println(F("⚠️ SENSOR and RTC failure logged"));
+
+        } else if (!sensorStatus) {
+          Serial.println(F("⚠️ SENSOR failure logged"));
+
+        } else {
+          Serial.println(F("⚠️ RTC failure logged"));
+        }
 
       } else {
-        Serial.println("⚠️ RTC failure logged");
+
+        sdStatus = false;
+        Serial.println(F("❌ Failed to open log.csv"));
+        Serial.println(F("⚠️ SD Card Not Available - RESET required"));
       }
-
-    } else {
-
-      // Mark the SD card unavailable if the log file cannot be opened.
-      sdStatus = false;
-      Serial.println("❌ Failed to open log.csv");
     }
   }
 
@@ -495,7 +560,7 @@ void loop() {
 
     // Check whether the RTC read caused an I2C timeout.
     if (Wire.getWireTimeoutFlag()) {
-      Serial.println("WARNING: I2C timeout");
+      Serial.println(F("WARNING: I2C timeout"));
 
       // Clear the timeout flag for future monitoring.
       Wire.clearWireTimeoutFlag();
@@ -519,8 +584,7 @@ void loop() {
       display_3.printTime(
         hour,
         minute,
-        showColon
-      );
+        showColon);
     }
   }
 
@@ -549,10 +613,7 @@ long readVcc() {
 
   // Select AVcc as the ADC reference and measure
   // the ATmega328P internal nominal 1.1 V reference.
-  ADMUX = _BV(REFS0) |
-          _BV(MUX3) |
-          _BV(MUX2) |
-          _BV(MUX1);
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
 
   // Allow the ADC reference and multiplexer to stabilize.
   delay(2);
