@@ -83,7 +83,6 @@ SmartTM1637 display_1(CLK_PIN_1, DIO_PIN_1);  // Temperature display
 SmartTM1637 display_2(CLK_PIN_2, DIO_PIN_2);  // Humidity display
 SmartTM1637 display_3(CLK_PIN_3, DIO_PIN_3);  // RTC clock display
 
-//MyDHT22 dht(DHT_PIN);  // DHT22 sensor object
 RTC_DS3231 rtc;  // DS3231 RTC object
 SdFat SD;        // SD card file-system object
 File logFile;    // SD log file object
@@ -186,17 +185,17 @@ void setup() {
   sdStatus = SD.begin(CS_PIN);
 
   if (!sdStatus) {
-    Serial.println("❌ Failed to initialize SD card!");
+    Serial.println(F("❌ Failed to initialize SD card!"));
     display_1.print("SdEr");
   } else {
-    Serial.println("✅ SD Card OK");
+    Serial.println(F("✅ SD Card OK"));
   }
 
   //========================================================
   // Create CSV Header
   //========================================================
   // Create log.csv only when it does not already exist.
-  if (!SD.exists("log.csv")) {
+  if (sdStatus && !SD.exists("log.csv")) {
     logFile = SD.open("log.csv", FILE_WRITE);
 
     if (logFile) {
