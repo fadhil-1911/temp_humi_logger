@@ -20,7 +20,6 @@ Version 1.3.0 introduces **multi-sensor support**, adding the SHT41 as an altern
 * SHT41 I2C communication failure detection
 * Generic `SENSOR_OK` status reporting
 * CSV-compatible log files
-* 8-second hardware watchdog recovery
 * Independent main-loop heartbeat on D9
 * I2C timeout protection
 * Low-VCC monitoring
@@ -107,7 +106,6 @@ Automatic SD re-initialization is intentionally not used because repeated SD ini
 
 The reliability improvements introduced in v1.2.3 remain available in v1.3.0:
 
-* 8-second hardware watchdog recovery
 * Independent main-loop heartbeat on D9
 * I2C timeout protection with automatic TWI recovery
 * I2C bus operating at 100 kHz
@@ -180,7 +178,6 @@ Install the library required for the sensor you want to use:
 ### Built-in Libraries
 
 - Wire (built into the Arduino IDE)
-- AVR Watchdog (`avr/wdt.h`, included with the AVR toolchain)
 
 Install the required third-party libraries using the Arduino Library Manager before compiling.
 
@@ -395,6 +392,7 @@ The complete DHT22 loop operation and program flow are documented separately.
 - Optimized constant Serial strings using `F()` to reduce SRAM usage
 - Improved available SRAM and memory headroom
 - Preserved watchdog, I2C timeout, heartbeat, RTC, VCC, and CSV diagnostic features from v1.2.3
+- Removed 8-second hardware watchdog recovery due to stability issues
 
 ### v1.2.3
 
