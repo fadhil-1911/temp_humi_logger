@@ -3,14 +3,11 @@ Temp/Humi Logger v1.3.0
 ├── POWER / MCU
 │   └── Arduino Uno / Nano (ATmega328P)
 │       ├── 5 V supply
-│       ├── Internal VCC monitor
-│       │   ├── readVcc()
-│       │   └── Warning if VCC < 4.5 V
-│       │
-│       └── Hardware Watchdog
-│           ├── Timeout: 8 seconds
-│           ├── wdt_reset() every main-loop cycle
-│           └── Automatic MCU reset if firmware hangs
+│       └── Internal VCC monitor
+│           ├── readVcc()
+│           └── Warning if VCC < 4.5V    
+│           
+│           
 │
 ├── SENSOR
 │   │
@@ -130,8 +127,6 @@ Temp/Humi Logger v1.3.0
 │       └── Stops blinking → firmware potentially blocked
 │
 └── MAIN LOOP
-    │
-    ├── wdt_reset()
     │
     ├── Sensor session scheduler
     │
