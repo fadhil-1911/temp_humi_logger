@@ -365,7 +365,7 @@ D8 is only used when the DHT22 configuration is enabled. When SHT41 is selected,
 
 ## Wiring Diagram
 
-![Arduino Nano Wiring Diagram](docs/wiring/TEMP HUMI LOGGER.png)
+![Arduino Nano Wiring Diagram](docs/wiring/TEMP_HUMI_LOGGER.png)
 ⸻
 
 ## Program Flow
