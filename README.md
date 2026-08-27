@@ -16,7 +16,9 @@ Version 1.3.0 introduces **multi-sensor support**, adding the SHT41 as an altern
 * Automatic logging to MicroSD card
 * Live data display on three TM1637 4-digit displays
 * Non-blocking program architecture using `millis()`
-* Automatic sensor retry with a maximum of 3 attempts
+* Fixed 2-second sensor sampling cycle
+* Sensor-specific non-blocking read and retry handling
+* SHT41 retry with up to 3 attempts per sampling slot
 * SHT41 I2C communication failure detection
 * Generic `SENSOR_OK` status reporting
 * CSV-compatible log files
@@ -24,7 +26,6 @@ Version 1.3.0 introduces **multi-sensor support**, adding the SHT41 as an altern
 * I2C timeout protection
 * Low-VCC monitoring
 * Fail-safe operation during sensor or SD logging failures
-
 ---
 
 ## Sensor Selection
@@ -63,7 +64,8 @@ For example, the configuration above enables the **SHT41** and disables the **DH
 * Compile-time selection between DHT22 and SHT41
 * SHT41 initialization status checking
 * Explicit SHT41 I2C communication failure detection
-* SHT41 integration with the existing non-blocking 3-attempt retry mechanism
+* Sensor-specific non-blocking read and retry handling
+* SHT41 retry with up to 3 attempts per 2-second sampling slot
 * Generic `SENSOR_OK` status reporting for supported sensors
 * Fail-safe SD handling after a logging failure
 
@@ -72,6 +74,7 @@ For example, the configuration above enables the **SHT41** and disables the **DH
 * Prevented failed SHT41 transactions from producing stale or invalid readings
 * Generalized sensor handling for DHT22 and SHT41
 * Improved sensor disconnect and recovery behavior
+* Maintained a fixed 2-second sensor sampling cycle
 * Sensor, RTC, display, and heartbeat operation continue after an SD logging failure
 * Optimized constant Serial strings using `F()` to reduce SRAM usage
 * Reduced SRAM usage from approximately **83% to 71%**
@@ -104,7 +107,7 @@ Automatic SD re-initialization is intentionally not used because repeated SD ini
 
 ## Reliability Features
 
-The reliability improvements introduced in v1.2.3 remain available in v1.3.0:
+The following reliability features introduced in earlier releases remain available in v1.3.0:
 
 * Independent main-loop heartbeat on D9
 * I2C timeout protection with automatic TWI recovery
@@ -126,13 +129,13 @@ The following behaviors have been tested on real hardware:
 * SHT41 firmware build — **PASS**
 * SHT41 normal measurement — **PASS**
 * SHT41 disconnect detection — **PASS**
-* SHT41 3-attempt retry — **PASS**
+* SHT41 retry with up to 3 attempts per sampling slot — **PASS**
 * SHT41 reconnection recovery — **PASS**
 * SD logging failure detection — **PASS**
 * Logger continues operating after SD removal — **PASS**
 * SD logging resumes after SD reinsertion and MCU reset — **PASS**
 
-Version 1.3.0 therefore extends the Temp/Humi Logger from a DHT22-specific logger into a more flexible **multi-sensor platform** while maintaining the reliability-oriented architecture introduced in v1.2.3.
+Version 1.3.0 extends the Temp/Humi Logger from a DHT22-specific logger into a flexible **multi-sensor platform** with sensor-specific read and retry handling while maintaining the reliability-oriented architecture introduced in earlier releases.
 
 
 ⸻
@@ -239,53 +242,78 @@ If the SD card is removed during operation, logging stops while the sensor, RTC,
 
 ## Sensor Retry Mechanism
 
-Version 1.3.0 uses a common non-blocking retry mechanism for both supported temperature and humidity sensors:
+Version 1.3.0 uses sensor-specific reading and retry behavior while maintaining a non-blocking 2-second sampling cycle.
 
-DHT22
-SHT41
-Workflow
-Start a new sensor reading session.
-Attempt to read temperature and humidity.
+### DHT22
+
+The DHT22 is read once during each 2-second sampling slot.
+
 If the reading succeeds:
-Store the latest temperature and humidity values.
-Update the temperature and humidity displays.
-Set SENSOR_OK = 1.
-Save the measurement to the SD card.
+
+- Store the latest temperature and humidity values.
+- Update the temperature and humidity displays.
+- Set `SENSOR_OK = 1`.
+- Save the measurement to the SD card.
+
 If the reading fails:
-Wait for the configured retry interval.
-Retry automatically without blocking the main loop.
-Maximum retry attempts: 3.
-If all retry attempts fail:
-Record NA for temperature and humidity.
-Set SENSOR_OK = 0.
-Display an error indication.
-Continue normal system operation.
-A new sensor reading session will be attempted automatically during the next cycle.
 
-For SHT41, the firmware also checks the result of the I2C communication before accepting the temperature and humidity values. This prevents failed communication from being interpreted as a valid or stale measurement.
+- No immediate retry is performed within the same sampling slot.
+- Record `NA` for temperature and humidity.
+- Set `SENSOR_OK = 0`.
+- Continue normal system operation.
+- A new reading is attempted during the next 2-second sampling slot.
 
-The retry process uses a non-blocking state-based approach, allowing other tasks such as RTC updates, clock display refresh, heartbeat monitoring, and watchdog servicing to continue while waiting between sensor retry attempts.
+This behavior respects the DHT22 measurement timing requirements and prevents unnecessary repeated reads.
 
-This allows the logger to recover automatically from temporary sensor communication failures without stopping the entire system.
+### SHT41
 
-Advantages
-Supports both DHT22 and SHT41 sensors
-Simple compile-time sensor selection
-Common SENSOR_OK status reporting
-Non-blocking sensor retry handling
-Automatic sensor recovery after temporary communication failures
-SHT41 communication failure detection
-Protection against stale or invalid SHT41 readings
-Improved multitasking and responsiveness
-Fail-safe operation after SD logging failure
-Hardware watchdog recovery
-I2C timeout protection
-Independent heartbeat monitoring
-Low-voltage monitoring for power diagnostics
-Reduced SRAM usage through Flash-stored constant strings
-CSV status flags for easier diagnostics
-Easier debugging and maintenance
-Ready for future sensor and feature expansion
+The SHT41 supports up to three read attempts within each 2-second sampling slot.
+
+If the first reading fails:
+
+- Wait approximately 200 ms.
+- Retry automatically without blocking the main loop.
+- A maximum of 3 attempts is allowed within the current sampling slot.
+
+If any attempt succeeds:
+
+- Store the latest temperature and humidity values.
+- Update the temperature and humidity displays.
+- Set `SENSOR_OK = 1`.
+- Save the measurement to the SD card.
+
+If all three attempts fail:
+
+- Record `NA` for temperature and humidity.
+- Set `SENSOR_OK = 0`.
+- Display an error indication.
+- Continue normal system operation.
+
+The next sensor reading session begins during the next 2-second sampling slot.
+
+For SHT41, the firmware also verifies the I2C communication result before accepting the temperature and humidity values. This prevents failed communication from being interpreted as a valid or stale measurement.
+
+Both sensor profiles use a non-blocking state-based architecture so RTC updates, display refresh, heartbeat monitoring, and other system tasks can continue during sensor operation.
+
+### Advantages
+
+- Supports both DHT22 and SHT41 sensors
+- Simple compile-time sensor selection
+- Common `SENSOR_OK` status reporting
+- Sensor-specific non-blocking read and retry handling
+- Fixed 2-second sampling cycle
+- Automatic SHT41 recovery from temporary communication failures
+- SHT41 communication failure detection
+- Protection against stale or invalid SHT41 readings
+- Improved multitasking and responsiveness
+- Fail-safe operation after SD logging failure
+- I2C timeout protection
+- Independent heartbeat monitoring
+- Low-voltage monitoring for power diagnostics
+- Reduced SRAM usage through Flash-stored constant strings
+- CSV status flags for easier diagnostics
+- Easier debugging and maintenance
+- Ready for future sensor and feature expansion
 
 ⸻
 
@@ -382,7 +410,7 @@ The complete sensor loop operation and program flow are documented separately.
 - Added SHT41 temperature and humidity sensor support
 - Added compile-time sensor selection between DHT22 and SHT41
 - Added SHT41 initialization and I2C communication failure detection
-- Integrated SHT41 with the existing non-blocking 3-attempt retry mechanism
+- Added SHT41 non-blocking retry with up to 3 attempts per 2-second sampling slot
 - Prevented failed SHT41 transactions from producing stale or invalid readings
 - Generalized sensor status reporting from `DHT_OK` to `SENSOR_OK`
 - Generalized sensor retry and logging logic for multi-sensor operation
@@ -391,7 +419,7 @@ The complete sensor loop operation and program flow are documented separately.
 - SD logging remains disabled after a card failure until the logger is reset
 - Optimized constant Serial strings using `F()` to reduce SRAM usage
 - Improved available SRAM and memory headroom
-- Preserved watchdog, I2C timeout, heartbeat, RTC, VCC, and CSV diagnostic features from v1.2.3
+- Preserved I2C timeout, heartbeat, RTC, VCC, and CSV diagnostic features from v1.2.3
 - Removed 8-second hardware watchdog recovery due to stability issues
 
 ### v1.2.3
