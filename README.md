@@ -184,7 +184,7 @@ Install the library required for the sensor you want to use:
 
 Install the required third-party libraries using the Arduino Library Manager before compiling.
 
-The `Wire` library is included with the Arduino IDE, while `avr/wdt.h` is provided by the AVR core/toolchain and does not require separate installation.
+The `Wire` library is included with the Arduino IDE and does not require separate installation.
 
 Only the library for the selected temperature and humidity sensor is included during compilation through the firmware's compile-time sensor selection.
 ⸻
