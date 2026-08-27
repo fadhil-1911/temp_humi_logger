@@ -1,3 +1,4 @@
+```text
 Temp/Humi Logger v1.3.0
 │
 ├── POWER / MCU
@@ -5,9 +6,7 @@ Temp/Humi Logger v1.3.0
 │       ├── 5 V supply
 │       └── Internal VCC monitor
 │           ├── readVcc()
-│           └── Warning if VCC < 4.5V    
-│           
-│           
+│           └── Warning if VCC < 4.5 V
 │
 ├── SENSOR
 │   │
@@ -18,7 +17,11 @@ Temp/Humi Logger v1.3.0
 │   ├── DHT22
 │   │   ├── DATA → D8
 │   │   ├── Temperature
-│   │   └── Humidity
+│   │   ├── Humidity
+│   │   └── Sampling behavior
+│   │       ├── Sampling interval → 2000 ms
+│   │       ├── 1 read attempt per sampling slot
+│   │       └── Failure → NA → next 2-second slot
 │   │
 │   ├── SHT41
 │   │   ├── I²C
@@ -27,22 +30,42 @@ Temp/Humi Logger v1.3.0
 │   │   ├── Temperature
 │   │   ├── Humidity
 │   │   ├── Initialization status detection
-│   │   └── Communication failure detection
+│   │   ├── Communication failure detection
+│   │   └── Retry behavior
+│   │       ├── Sampling interval → 2000 ms
+│   │       ├── Maximum → 3 attempts per sampling slot
+│   │       ├── Retry interval → 200 ms
+│   │       └── All attempts fail → NA
 │   │
-│   └── Common Non-Blocking Read State Machine
-│       ├── Start sensor reading session
-│       ├── Read attempt
-│       ├── Retry on failure
-│       │   ├── Maximum: 3 attempts
-│       │   └── Retry interval: 2000 ms
+│   └── Sensor-Specific Non-Blocking Read Handling
+│       ├── Start 2-second sampling slot
 │       │
-│       └── Result
-│           ├── SUCCESS
+│       ├── DHT22 selected
+│       │   ├── Perform one read attempt
+│       │   ├── SUCCESS
+│       │   │   ├── temp
+│       │   │   ├── humi
+│       │   │   └── SENSOR_OK = 1
+│       │   │
+│       │   └── FAILED
+│       │       ├── Temperature = NA
+│       │       ├── Humidity = NA
+│       │       ├── SENSOR_OK = 0
+│       │       └── Wait for next 2-second slot
+│       │
+│       └── SHT41 selected
+│           ├── Attempt #1
+│           ├── Failure → wait 200 ms
+│           ├── Attempt #2
+│           ├── Failure → wait 200 ms
+│           ├── Attempt #3
+│           │
+│           ├── SUCCESS on any attempt
 │           │   ├── temp
 │           │   ├── humi
 │           │   └── SENSOR_OK = 1
 │           │
-│           └── FAILED
+│           └── All attempts FAILED
 │               ├── Temperature = NA
 │               ├── Humidity = NA
 │               ├── SENSOR_OK = 0
@@ -102,6 +125,7 @@ Temp/Humi Logger v1.3.0
 │       │   └── SCK  → D13
 │       │
 │       ├── log.csv
+│       │   ├── One record per completed sampling slot
 │       │   ├── Date
 │       │   ├── Time
 │       │   ├── Temp_C
@@ -128,11 +152,16 @@ Temp/Humi Logger v1.3.0
 │
 └── MAIN LOOP
     │
-    ├── Sensor session scheduler
+    ├── Sensor sampling scheduler
+    │   └── Fixed 2000 ms sampling interval
     │
-    ├── Common sensor retry state machine
-    │   ├── DHT22 read path
-    │   └── SHT41 read path
+    ├── Sensor-specific read handling
+    │   ├── DHT22
+    │   │   └── 1 attempt per sampling slot
+    │   │
+    │   └── SHT41
+    │       ├── Up to 3 attempts per sampling slot
+    │       └── 200 ms between retries
     │
     ├── Process completed sensor result
     │   ├── Read RTC timestamp
@@ -141,10 +170,13 @@ Temp/Humi Logger v1.3.0
     │   ├── Check low VCC
     │   ├── Update temperature display
     │   ├── Update humidity display
-    │   └── Write CSV record if SD available
+    │   └── Write one CSV record if SD available
     │
     ├── RTC clock display scheduler
     │   └── Every 250 ms
     │
     └── Heartbeat scheduler
         └── Every 1000 ms
+```
+
+
