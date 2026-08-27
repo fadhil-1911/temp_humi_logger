@@ -10,7 +10,8 @@
 Updates: - Added SHT41 temperature and humidity sensor support. 
 - Added compile-time selection between DHT22 and SHT41. 
 - Added SHT41 initialization and communication failure detection. 
-- Integrated SHT41 with the existing non-blocking 3-attempt retry mechanism. 
+- Added sensor-specific non-blocking read and retry handling.
+- Added SHT41 retry with up to 3 attempts per 2-second sampling slot.. 
 - Prevented failed SHT41 transactions from producing stale or invalid readings. 
 - Generalized sensor status reporting using SENSOR_OK. 
 - Added fail-safe SD handling so sensor, RTC, display, and heartbeat continue 
@@ -62,8 +63,8 @@ Updates: - Added SHT41 temperature and humidity sensor support.
 //
 // IMPORTANT: Enable only ONE sensor at a time.
 
-//#define SENSOR_DHT22   // DHT22 sensor
-#define SENSOR_SHT41  // SHT41 sensor
+#define SENSOR_DHT22   // DHT22 sensor
+//#define SENSOR_SHT41  // SHT41 sensor
 
 //========================================================
 #ifdef SENSOR_DHT22
@@ -115,10 +116,15 @@ bool heartbeatState = false;      // Current heartbeat LED state
 //==========================================================
 // SENSOR Non-Blocking Retry State
 //==========================================================
-const int maxRetry = 3;                    // Maximum SENSOR read attempts
-int retryCount = 0;                        // Current retry count
-unsigned long lastRetryTime = 0;           // Time of the previous retry attempt
-const unsigned long retryInterval = 2000;  // Delay between retry attempts
+const unsigned long sensorInterval = 2000;  // Fixed 2-second sampling slot
+
+#ifdef SENSOR_SHT41
+const int maxRetry = 3;                   // Maximum SHT41 attempts per slot
+const unsigned long retryInterval = 200;  // 200 ms between SHT41 attempts
+#endif
+
+int retryCount = 0;
+unsigned long lastRetryTime = 0;
 
 bool readOK = false;           // True when the latest SENSOR read succeeds
 bool retryInProgress = false;  // True while a retry session is active
@@ -223,9 +229,6 @@ void setup() {
 
   // Allow startup messages to remain visible before normal operation.
   delay(3000);
-
-  // Enable the hardware watchdog.
-  // The MCU will reset if the main loop stops servicing it for 8 seconds.
 }
 
 //==========================================================
@@ -243,7 +246,7 @@ void loop() {
   // - no retry session is active,
   // - no completed result is waiting to be processed,
   // - at least 2 seconds have passed since the previous session.
-  if (!retryInProgress && !resultReady && currentMillis - lastReadTimeSensor >= 2000) {
+  if (!retryInProgress && !resultReady && currentMillis - lastReadTimeSensor >= sensorInterval) {
 
     // Record the start time of this reading session.
     lastReadTimeSensor = currentMillis;
@@ -258,50 +261,57 @@ void loop() {
     // Mark the retry state machine as active.
     retryInProgress = true;
 
-    // Backdate lastRetryTime so the first read attempt
-    // can execute immediately without waiting.
+// Backdate lastRetryTime so the first read attempt
+// can execute immediately without waiting.
+#ifdef SENSOR_SHT41
     lastRetryTime = currentMillis - retryInterval;
+#endif
   }
 
   //========================================================
-  // 2. Process SENSOR Retry Attempts
+  // 2. Process SENSOR Reading / Retry Attempts
   //========================================================
-  // Attempt another SENSOR read when the retry interval has elapsed.
-  if (retryInProgress && currentMillis - lastRetryTime >= retryInterval) {
-
-    lastRetryTime = currentMillis;
 
 #ifdef SENSOR_DHT22
 
+  // DHT22 performs only ONE read attempt per 2-second sampling slot.
+  if (retryInProgress) {
+
     if (dht.readData()) {
+
       temp = dht.getTemperature();
       humi = dht.getHumidity();
 
-      sensorStatus = true;
-      readOK = true;
-      retryInProgress = false;
-      resultReady = true;
-
-    } else {
-      retryCount++;
-
-      Serial.print(F("DHT22 reading attempt failed: "));
-      Serial.print(retryCount);
-      Serial.print(F("/"));
-      Serial.println(maxRetry);
-
-      if (retryCount >= maxRetry) {
+      if (!isnan(temp) && !isnan(humi)) {
+        sensorStatus = true;
+        readOK = true;
+      } else {
         sensorStatus = false;
         readOK = false;
-        retryInProgress = false;
-        resultReady = true;
       }
+
+    } else {
+
+      Serial.println(F("DHT22 reading failed"));
+      sensorStatus = false;
+      readOK = false;
     }
+
+    // DHT22 does not retry within the current sampling slot.
+    retryInProgress = false;
+    resultReady = true;
+  }
 
 #endif
 
 
 #ifdef SENSOR_SHT41
+
+  // SHT41 may perform up to three attempts within the current
+  // 2-second sampling slot, with 200 ms between attempts.
+  if (retryInProgress && currentMillis - lastRetryTime >= retryInterval) {
+
+    lastRetryTime = currentMillis;
 
     sensors_event_t humidity, temperature;
 
@@ -313,12 +323,14 @@ void loop() {
       humi = humidity.relative_humidity;
 
       if (!isnan(temp) && !isnan(humi)) {
+
         sensorStatus = true;
         readOK = true;
         retryInProgress = false;
         resultReady = true;
 
       } else {
+
         retryCount++;
 
         Serial.print(F("SHT41 invalid reading: "));
@@ -350,260 +362,258 @@ void loop() {
         resultReady = true;
       }
     }
+  }
 
 #endif
+
+
+//========================================================
+// 3. Process the Completed Sensor Result
+//========================================================
+if (resultReady) {
+
+  // Clear the result flag so this block runs only once per session.
+  resultReady = false;
+
+  //======================================================
+  // 3.1 Read RTC Timestamp
+  //======================================================
+  DateTime now = rtc.now();
+
+  // Check whether the RTC transaction caused an I2C timeout.
+  if (Wire.getWireTimeoutFlag()) {
+    Serial.println("WARNING: I2C timeout during RTC log read");
+
+    // Clear the timeout flag so future transactions can be monitored.
+    Wire.clearWireTimeoutFlag();
+
+    // Mark the RTC timestamp as invalid.
+    rtcStatus = false;
+
+  } else {
+
+    // Perform a basic validity check on the RTC year.
+    rtcStatus = (now.year() >= 2020);
   }
 
-  //========================================================
-  // 3. Process the Completed Sensor Result
-  //========================================================
-  if (resultReady) {
+  // Allocate fixed-size buffers for CSV date and time strings.
+  char dateStr[11];
+  char timeStr[9];
 
-    // Clear the result flag so this block runs only once per session.
-    resultReady = false;
+  // Format the RTC date as YYYY-MM-DD.
+  snprintf(
+    dateStr,
+    sizeof(dateStr),
+    "%04d-%02d-%02d",
+    now.year(),
+    now.month(),
+    now.day());
 
-    // Schedule the next SENSOR reading session relative to now.
-    lastReadTimeSensor = currentMillis;
+  // Format the RTC time as HH:MM:SS.
+  snprintf(
+    timeStr,
+    sizeof(timeStr),
+    "%02d:%02d:%02d",
+    now.hour(),
+    now.minute(),
+    now.second());
 
-    //======================================================
-    // 3.1 Read RTC Timestamp
-    //======================================================
-    DateTime now = rtc.now();
+  //======================================================
+  // 3.2 Measure MCU Supply Voltage
+  //======================================================
+  // Read VCC only once and reuse the same value
+  // for Serial output and SD logging.
+  long vccMillivolts = readVcc();
+  float vccVolts = vccMillivolts / 1000.0;
 
-    // Check whether the RTC transaction caused an I2C timeout.
-    if (Wire.getWireTimeoutFlag()) {
-      Serial.println("WARNING: I2C timeout during RTC log read");
+  // Warn when the measured 5 V rail drops below 4.5 V.
+  if (vccVolts < 4.5) {
+    Serial.println(F("WARNING: Low VCC"));
+  }
 
-      // Clear the timeout flag so future transactions can be monitored.
-      Wire.clearWireTimeoutFlag();
+  //======================================================
+  // 3.3 Update Temperature and Humidity Displays
+  //======================================================
+  if (readOK) {
 
-      // Mark the RTC timestamp as invalid.
-      rtcStatus = false;
+    // Display the latest valid temperature and humidity values.
+    display_1.print(temp, "C", true);
+    display_2.print(humi, "h", true);
 
-    } else {
+    // Mark both sensor displays as successfully updated.
+    disp1Status = true;
+    disp2Status = true;
 
-      // Perform a basic validity check on the RTC year.
-      rtcStatus = (now.year() >= 2020);
-    }
+    // Print the current measurement to Serial Monitor.
+    Serial.print(F("Temp: "));
+    Serial.print(temp, 1);
+    Serial.print(F(" | Humidity: "));
+    Serial.print(humi, 1);
+    Serial.print(F(" | VCC: "));
+    Serial.print(vccVolts, 2);
+    Serial.println(F(" V"));
 
-    // Allocate fixed-size buffers for CSV date and time strings.
-    char dateStr[11];
-    char timeStr[9];
+  } else {
 
-    // Format the RTC date as YYYY-MM-DD.
-    snprintf(
-      dateStr,
-      sizeof(dateStr),
-      "%04d-%02d-%02d",
-      now.year(),
-      now.month(),
-      now.day());
+    // Show an error message when all SENSOR attempts fail.
+    display_1.print("Err");
+    display_2.print("Err");
 
-    // Format the RTC time as HH:MM:SS.
-    snprintf(
-      timeStr,
-      sizeof(timeStr),
-      "%02d:%02d:%02d",
-      now.hour(),
-      now.minute(),
-      now.second());
+    // Mark both sensor displays as invalid for this cycle.
+    disp1Status = false;
+    disp2Status = false;
 
-    //======================================================
-    // 3.2 Measure MCU Supply Voltage
-    //======================================================
-    // Read VCC only once and reuse the same value
-    // for Serial output and SD logging.
-    long vccMillivolts = readVcc();
-    float vccVolts = vccMillivolts / 1000.0;
+    Serial.println(F("❌ Sensor reading failed for this sampling slot"));
+  }
 
-    // Warn when the measured 5 V rail drops below 4.5 V.
-    if (vccVolts < 4.5) {
-      Serial.println(F("WARNING: Low VCC"));
-    }
+  //======================================================
+  // 3.4 Open CSV Log File
+  //======================================================
+  if (sdStatus) {
 
-    //======================================================
-    // 3.3 Update Temperature and Humidity Displays
-    //======================================================
-    if (readOK) {
+    logFile = SD.open("log.csv", FILE_WRITE);
 
-      // Display the latest valid temperature and humidity values.
-      display_1.print(temp, "C", true);
-      display_2.print(humi, "h", true);
+    if (logFile) {
 
-      // Mark both sensor displays as successfully updated.
-      disp1Status = true;
-      disp2Status = true;
+      sdStatus = true;
 
-      // Print the current measurement to Serial Monitor.
-      Serial.print(F("Temp: "));
-      Serial.print(temp, 1);
-      Serial.print(F(" | Humidity: "));
-      Serial.print(humi, 1);
-      Serial.print(F(" | VCC: "));
-      Serial.print(vccVolts, 2);
-      Serial.println(F(" V"));
+      // Date
+      if (rtcStatus) {
+        logFile.print(dateStr);
+      } else {
+        logFile.print("NA");
+      }
 
-    } else {
+      logFile.print(",");
 
-      // Show an error message when all SENSOR attempts fail.
-      display_1.print("Err");
-      display_2.print("Err");
+      // Time
+      if (rtcStatus) {
+        logFile.print(timeStr);
+      } else {
+        logFile.print("NA");
+      }
 
-      // Mark both sensor displays as invalid for this cycle.
-      disp1Status = false;
-      disp2Status = false;
+      logFile.print(",");
 
-      Serial.println(F("❌ Failed to read SENSOR after 3 attempts"));
-    }
+      // Temperature
+      if (sensorStatus) {
+        logFile.print(temp, 1);
+      } else {
+        logFile.print("NA");
+      }
 
-    //======================================================
-    // 3.4 Open CSV Log File
-    //======================================================
-    if (sdStatus) {
+      logFile.print(",");
 
-      logFile = SD.open("log.csv", FILE_WRITE);
+      // Humidity
+      if (sensorStatus) {
+        logFile.print(humi, 1);
+      } else {
+        logFile.print("NA");
+      }
 
-      if (logFile) {
+      // Device Status Flags
+      logFile.print(",");
+      logFile.print(sensorStatus ? "1" : "0");
 
-        sdStatus = true;
+      logFile.print(",");
+      logFile.print(rtcStatus ? "1" : "0");
 
-        // Date
-        if (rtcStatus) {
-          logFile.print(dateStr);
-        } else {
-          logFile.print("NA");
-        }
+      logFile.print(",");
+      logFile.print(sdStatus ? "1" : "0");
 
-        logFile.print(",");
+      logFile.print(",");
+      logFile.print(disp1Status ? "1" : "0");
 
-        // Time
-        if (rtcStatus) {
-          logFile.print(timeStr);
-        } else {
-          logFile.print("NA");
-        }
+      logFile.print(",");
+      logFile.print(disp2Status ? "1" : "0");
 
-        logFile.print(",");
+      // VCC
+      logFile.print(",");
+      logFile.println(vccVolts, 2);
 
-        // Temperature
-        if (sensorStatus) {
-          logFile.print(temp, 1);
-        } else {
-          logFile.print("NA");
-        }
+      logFile.close();
 
-        logFile.print(",");
+      if (sensorStatus && rtcStatus) {
+        Serial.println(F("✅ Log saved to SD card"));
 
-        // Humidity
-        if (sensorStatus) {
-          logFile.print(humi, 1);
-        } else {
-          logFile.print("NA");
-        }
+      } else if (!sensorStatus && !rtcStatus) {
+        Serial.println(F("⚠️ SENSOR and RTC failure logged"));
 
-        // Device Status Flags
-        logFile.print(",");
-        logFile.print(sensorStatus ? "1" : "0");
-
-        logFile.print(",");
-        logFile.print(rtcStatus ? "1" : "0");
-
-        logFile.print(",");
-        logFile.print(sdStatus ? "1" : "0");
-
-        logFile.print(",");
-        logFile.print(disp1Status ? "1" : "0");
-
-        logFile.print(",");
-        logFile.print(disp2Status ? "1" : "0");
-
-        // VCC
-        logFile.print(",");
-        logFile.println(vccVolts, 2);
-
-        logFile.close();
-
-        if (sensorStatus && rtcStatus) {
-          Serial.println(F("✅ Log saved to SD card"));
-
-        } else if (!sensorStatus && !rtcStatus) {
-          Serial.println(F("⚠️ SENSOR and RTC failure logged"));
-
-        } else if (!sensorStatus) {
-          Serial.println(F("⚠️ SENSOR failure logged"));
-
-        } else {
-          Serial.println(F("⚠️ RTC failure logged"));
-        }
+      } else if (!sensorStatus) {
+        Serial.println(F("⚠️ SENSOR failure logged"));
 
       } else {
-
-        sdStatus = false;
-        Serial.println(F("❌ Failed to open log.csv"));
-        Serial.println(F("⚠️ SD Card Not Available - RESET required"));
+        Serial.println(F("⚠️ RTC failure logged"));
       }
-    }
-  }
-
-  //========================================================
-  // 4. Update the RTC Clock Display
-  //========================================================
-  // Update the clock display every 250 ms instead of reading
-  // the RTC continuously on every loop iteration.
-  if (currentMillis - lastClockUpdate >= clockUpdateInterval) {
-
-    // Record the time of this display update.
-    lastClockUpdate = currentMillis;
-
-    // Read the current RTC time.
-    DateTime clockNow = rtc.now();
-
-    // Check whether the RTC read caused an I2C timeout.
-    if (Wire.getWireTimeoutFlag()) {
-      Serial.println(F("WARNING: I2C timeout"));
-
-      // Clear the timeout flag for future monitoring.
-      Wire.clearWireTimeoutFlag();
-
-      // Mark the RTC as unavailable.
-      rtcStatus = false;
 
     } else {
 
-      // RTC communication succeeded.
-      rtcStatus = true;
-
-      // Extract hour and minute for the clock display.
-      uint8_t hour = clockNow.hour();
-      uint8_t minute = clockNow.minute();
-
-      // Blink the clock colon every 500 ms.
-      bool showColon = (currentMillis / 500) % 2 == 0;
-
-      // Update the TM1637 clock display.
-      display_3.printTime(
-        hour,
-        minute,
-        showColon);
+      sdStatus = false;
+      Serial.println(F("❌ Failed to open log.csv"));
+      Serial.println(F("⚠️ SD Card Not Available - RESET required"));
     }
   }
+}
 
-  //========================================================
-  // 5. Main Loop Heartbeat
-  //========================================================
-  // Toggle the external LED every second.
-  // A stopped LED indicates that the main loop is no longer progressing.
-  if (currentMillis - lastHeartbeat >= 1000) {
+//========================================================
+// 4. Update the RTC Clock Display
+//========================================================
+// Update the clock display every 250 ms instead of reading
+// the RTC continuously on every loop iteration.
+if (currentMillis - lastClockUpdate >= clockUpdateInterval) {
 
-    // Save the current heartbeat timestamp.
-    lastHeartbeat = currentMillis;
+  // Record the time of this display update.
+  lastClockUpdate = currentMillis;
 
-    // Toggle the LED state.
-    heartbeatState = !heartbeatState;
+  // Read the current RTC time.
+  DateTime clockNow = rtc.now();
 
-    // Apply the new state to the external LED.
-    digitalWrite(HEARTBEAT_LED, heartbeatState);
+  // Check whether the RTC read caused an I2C timeout.
+  if (Wire.getWireTimeoutFlag()) {
+    Serial.println(F("WARNING: I2C timeout"));
+
+    // Clear the timeout flag for future monitoring.
+    Wire.clearWireTimeoutFlag();
+
+    // Mark the RTC as unavailable.
+    rtcStatus = false;
+
+  } else {
+
+    // RTC communication succeeded.
+    rtcStatus = true;
+
+    // Extract hour and minute for the clock display.
+    uint8_t hour = clockNow.hour();
+    uint8_t minute = clockNow.minute();
+
+    // Blink the clock colon every 500 ms.
+    bool showColon = (currentMillis / 500) % 2 == 0;
+
+    // Update the TM1637 clock display.
+    display_3.printTime(
+      hour,
+      minute,
+      showColon);
   }
+}
+
+//========================================================
+// 5. Main Loop Heartbeat
+//========================================================
+// Toggle the external LED every second.
+// A stopped LED indicates that the main loop is no longer progressing.
+if (currentMillis - lastHeartbeat >= 1000) {
+
+  // Save the current heartbeat timestamp.
+  lastHeartbeat = currentMillis;
+
+  // Toggle the LED state.
+  heartbeatState = !heartbeatState;
+
+  // Apply the new state to the external LED.
+  digitalWrite(HEARTBEAT_LED, heartbeatState);
+}
 }
 
 //==========================================================
