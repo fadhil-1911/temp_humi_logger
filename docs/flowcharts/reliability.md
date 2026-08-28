@@ -1,3 +1,4 @@
+```
 Temp/Humi Logger v1.3.0 Reliability
 │
 ├── Sensor Fault Protection
@@ -34,3 +35,4 @@ Temp/Humi Logger v1.3.0 Reliability
     └── D9 heartbeat
         ├── Toggle every 1 second
         └── Visual main-loop activity indicator
+```
